@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>State 2: Locked + Rect Select — 360 Image Studio</title>
+<style>
+  :root {
+    --bg: #1a1a2e; --panel: #16213e; --surface: #0f3460;
+    --accent: #e94560; --accent2: #533483; --text: #eee;
+    --text2: #aab; --border: #2a2a4a; --success: #00c853;
+    --radius: 8px; --font: system-ui, -apple-system, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--font); background: var(--bg); color: var(--text);
+    height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+  }
+  #topbar {
+    display: flex; align-items: center; gap: 12px; padding: 8px 16px;
+    background: var(--panel); border-bottom: 1px solid var(--border); min-height: 48px;
+  }
+  #topbar .logo { font-weight: 700; font-size: 16px; color: var(--accent); letter-spacing: -0.5px; }
+  #topbar .logo span { color: var(--text2); font-weight: 400; }
+  .tab-switcher {
+    display: flex; background: var(--bg); border-radius: var(--radius);
+    padding: 3px; margin: 0 auto 0 24px;
+  }
+  .tab-switcher button {
+    padding: 6px 18px; border: none; background: transparent;
+    color: var(--text2); border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500;
+  }
+  .tab-switcher button.active { background: var(--accent); color: #fff; }
+  .file-info { font-size: 12px; color: var(--text2); text-align: right; line-height: 1.4; }
+  #main { display: flex; flex: 1; overflow: hidden; }
+  #left-panel {
+    width: 220px; background: var(--panel); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; padding: 12px; gap: 8px; overflow-y: auto;
+  }
+  .panel-title {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px;
+    color: var(--text2); margin: 8px 0 4px; font-weight: 600;
+  }
+  .tool-btn {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    background: var(--bg); border: 1px solid transparent; border-radius: var(--radius);
+    color: var(--text); cursor: pointer; font-size: 13px; width: 100%; text-align: left;
+    transition: all .15s;
+  }
+  .tool-btn:hover { border-color: var(--border); }
+  .tool-btn.active { border-color: var(--accent); background: var(--surface); }
+  .tool-btn .icon { width: 20px; text-align: center; font-size: 16px; }
+  .tool-btn.disabled { opacity: 0.4; pointer-events: none; }
+  #center {
+    flex: 1; display: flex; flex-direction: column; background: #000;
+    position: relative; min-width: 0;
+  }
+  #viewer-container {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    position: relative;
+    background: radial-gradient(ellipse at center, #1a1a2e 0%, #000 70%);
+  }
+  #viewer-square {
+    aspect-ratio: 1/1;
+    width: min(75vh, 75%);
+    max-height: 90%;
+    background: linear-gradient(135deg, #2a3a5e 0%, #1a2a4e 30%, #0a1a2e 60%, #1a2a4e 100%);
+    border-radius: 4px; position: relative; overflow: hidden;
+    border: 1px solid #2a2a4a;
+  }
+  #viewer-square::before {
+    content: ''; position: absolute; inset: 0;
+    background:
+      linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+  .viewer-center {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    color: var(--text2); font-size: 14px; text-align: center; pointer-events: none;
+  }
+  .viewer-center .big { font-size: 48px; display: block; margin-bottom: 8px; opacity: 0.4; }
+
+  /* Lock badge */
+  .lock-badge {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    background: var(--accent); color: #fff; padding: 6px 16px;
+    border-radius: 20px; font-size: 12px; font-weight: 600;
+    z-index: 10; animation: pulse 1.5s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.7} }
+
+  /* Rect selection overlay */
+  .rect-selection {
+    position: absolute;
+    border: 2px solid #4fc3f7;
+    background: rgba(79,195,247,.12);
+    top: 25%; left: 30%;
+    width: 40%; height: 45%;
+    pointer-events: none;
+    z-index: 5;
+    box-shadow: 0 0 0 9999px rgba(0,0,0,.3);
+  }
+  /* Corner handles */
+  .rect-selection::before {
+    content: ''; position: absolute; top: -4px; left: -4px;
+    width: 10px; height: 10px; background: #4fc3f7; border-radius: 2px;
+  }
+  .rect-selection::after {
+    content: ''; position: absolute; bottom: -4px; right: -4px;
+    width: 10px; height: 10px; background: #4fc3f7; border-radius: 2px;
+  }
+  .corner-tr {
+    position: absolute; top: -4px; right: -4px;
+    width: 10px; height: 10px; background: #4fc3f7; border-radius: 2px;
+    z-index: 6; pointer-events: none;
+  }
+  .corner-bl {
+    position: absolute; bottom: -4px; left: -4px;
+    width: 10px; height: 10px; background: #4fc3f7; border-radius: 2px;
+    z-index: 6; pointer-events: none;
+  }
+
+  /* Resolution info popup */
+  .res-info {
+    position: absolute; top: calc(25% - 42px); left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,.85); border: 1px solid #4fc3f7; border-radius: 8px;
+    padding: 8px 16px; font-size: 13px; text-align: center; z-index: 10;
+    pointer-events: none;
+  }
+  .res-info .px { color: #4fc3f7; font-weight: 700; font-size: 18px; }
+  .res-info .native { color: var(--text2); font-size: 11px; margin-top: 2px; }
+
+  /* Rect actions */
+  .rect-actions {
+    position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 8px; z-index: 10;
+  }
+  .btn-rect {
+    padding: 8px 20px; border: none; border-radius: 20px;
+    cursor: pointer; font-size: 13px; font-weight: 600;
+    transition: all .15s;
+  }
+  .btn-full { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+  .btn-full:hover { border-color: #4fc3f7; }
+  .btn-confirm { background: #4fc3f7; color: #000; }
+  .btn-confirm:hover { filter: brightness(1.1); }
+  .btn-cancel { background: transparent; color: var(--text2); border: 1px solid #444; }
+  .btn-cancel:hover { color: #fff; border-color: #888; }
+
+  #right-panel {
+    width: 260px; background: var(--panel); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow-y: auto;
+  }
+  .panel-header {
+    padding: 12px; font-weight: 600; font-size: 13px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .layer-list { flex: 1; overflow-y: auto; }
+  .layer-item {
+    padding: 10px 12px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px; font-size: 12px;
+  }
+  .layer-item:hover { background: var(--surface); }
+  .layer-thumb {
+    width: 44px; height: 33px; background: var(--bg); border-radius: 3px;
+    flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 10px; color: var(--text2);
+  }
+  .layer-info { flex: 1; min-width: 0; }
+  .layer-info .name { font-weight: 500; }
+  .layer-info .meta { color: var(--text2); font-size: 11px; margin-top: 2px; }
+  .layer-actions { display: flex; gap: 4px; }
+  .layer-actions button {
+    background: none; border: none; color: var(--text2);
+    cursor: pointer; font-size: 14px; padding: 2px;
+  }
+  .layer-actions button.visible { color: var(--success); }
+  #bottombar {
+    background: var(--panel); border-top: 1px solid var(--border);
+    padding: 10px 16px; display: flex; gap: 10px; align-items: center;
+  }
+  #bottombar textarea {
+    flex: 1; background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--radius); color: var(--text); padding: 10px 14px;
+    font-size: 13px; font-family: var(--font); resize: none; min-height: 42px;
+  }
+  #bottombar textarea::placeholder { color: #555; }
+  .btn {
+    padding: 10px 20px; border: none; border-radius: var(--radius);
+    cursor: pointer; font-weight: 600; font-size: 13px; white-space: nowrap;
+  }
+  .btn:disabled { opacity: 0.4; pointer-events: none; }
+  .btn-preview { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+  .btn-apply { background: var(--accent); color: #fff; }
+  #statusbar {
+    background: var(--bg); border-top: 1px solid var(--border);
+    padding: 4px 16px; display: flex; justify-content: space-between;
+    font-size: 11px; color: var(--text2);
+  }
+  .step-indicator {
+    position: absolute; top: 42px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 6px; z-index: 10;
+  }
+  .step-dot { width: 8px; height: 8px; border-radius: 50%; background: #333; }
+  .step-dot.done { background: var(--success); }
+  .step-dot.active { background: var(--accent); }
+  .step-label {
+    position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
+    font-size: 11px; color: var(--text2); z-index: 10;
+  }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div class="logo">360<span>ImageStudio</span></div>
+  <div class="tab-switcher">
+    <button class="active">🌐 360 View</button>
+    <button>📐 Flat View</button>
+  </div>
+  <div class="file-info">panorama_hotel_8k.jpg<br>8192 × 4096 • 12.4 MB</div>
+</div>
+
+<div id="main">
+  <div id="left-panel">
+    <div class="panel-title">Selection</div>
+    <button class="tool-btn active">
+      <span class="icon">⬜</span> Rectangle Select
+    </button>
+    <button class="tool-btn disabled">
+      <span class="icon">🖊️</span> Brush Mask
+    </button>
+    <button class="tool-btn disabled">
+      <span class="icon">✏️</span> Lasso
+    </button>
+    <button class="tool-btn">
+      <span class="icon">↩️</span> Undo
+    </button>
+
+    <div class="panel-title" style="margin-top:16px;">Rect Options</div>
+    <div style="font-size:11px;color:var(--text2);padding:4px 0;">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+        <input type="checkbox" checked style="accent-color:var(--accent);"> Full viewport
+      </label>
+    </div>
+    <div style="font-size:11px;color:var(--text2);padding:4px 0;">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+        <input type="checkbox" style="accent-color:var(--accent);"> Free select
+      </label>
+    </div>
+
+    <div class="panel-title" style="margin-top:16px;">Horizon</div>
+    <div style="font-size:11px;color:var(--text2);padding:4px 0;">Roll: <strong>0.0°</strong></div>
+    <div style="font-size:11px;color:var(--text2);padding:4px 0;">Pitch: <strong>-2.3°</strong></div>
+    <div style="font-size:11px;color:var(--text2);padding:4px 0;">Yaw: <strong>45.0°</strong></div>
+
+    <div class="panel-title" style="margin-top:16px;">Project</div>
+    <button class="tool-btn"><span class="icon">💾</span> Save Project</button>
+    <button class="tool-btn"><span class="icon">📤</span> Export Image...</button>
+  </div>
+
+  <div id="center">
+    <div class="step-indicator">
+      <span class="step-dot done"></span>
+      <span class="step-dot active"></span>
+      <span class="step-dot"></span>
+      <span class="step-dot"></span>
+    </div>
+    <div class="step-label">② Locked — Vẽ Rectangle Select</div>
+
+    <div class="lock-badge">🔒 View Locked — yaw:45° pitch:-2.3° fov:75°</div>
+
+    <div id="viewer-container">
+      <div id="viewer-square">
+        <div class="viewer-center">
+          <span class="big">🌐</span>
+        </div>
+        <div class="rect-selection">
+          <div class="corner-tr"></div>
+          <div class="corner-bl"></div>
+        </div>
+        <div class="res-info">
+          Vùng chọn<br>
+          <span class="px">680 × 420 px</span>
+          <div class="native">ảnh gốc: 3400 × 2100px (scale 5:1)</div>
+        </div>
+      </div>
+      <div class="rect-actions">
+        <button class="btn-rect btn-cancel">✕ Cancel</button>
+        <button class="btn-rect btn-full">⬜ Full Frame</button>
+        <button class="btn-rect btn-confirm">✓ Apply Rect → Canvas</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="right-panel">
+    <div class="panel-header">
+      Layers
+      <span style="font-size:11px;color:var(--text2);">3 layers</span>
+    </div>
+    <div class="layer-list">
+      <div class="layer-item">
+        <div class="layer-thumb">🖼️</div>
+        <div class="layer-info">
+          <div class="name">Edit #3 — "thay bãi đất..."</div>
+          <div class="meta">360° View • 2 min ago</div>
+        </div>
+        <div class="layer-actions">
+          <button class="visible" title="Hide layer">👁️</button>
+          <button title="Delete">🗑️</button>
+        </div>
+      </div>
+      <div class="layer-item">
+        <div class="layer-thumb">🖼️</div>
+        <div class="layer-info">
+          <div class="name">Edit #2 — "xóa xe máy"</div>
+          <div class="meta">Flat View • 5 min ago</div>
+        </div>
+        <div class="layer-actions">
+          <button class="visible" title="Hide layer">👁️</button>
+          <button title="Delete">🗑️</button>
+        </div>
+      </div>
+      <div class="layer-item">
+        <div class="layer-thumb">🖼️</div>
+        <div class="layer-info">
+          <div class="name">Edit #1 — "remove person"</div>
+          <div class="meta">360° View • 8 min ago</div>
+        </div>
+        <div class="layer-actions">
+          <button class="visible" title="Hide layer">👁️</button>
+          <button title="Delete">🗑️</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="bottombar">
+  <textarea placeholder="Vẽ Rect trước → Apply → sau đó mới nhập prompt..." disabled></textarea>
+  <button class="btn btn-preview" disabled>👁 Preview</button>
+  <button class="btn btn-apply" disabled>✅ Apply</button>
+</div>
+
+<div id="statusbar">
+  <span>🔒 Locked • Rect Select: 680×420px • Full Frame / Free Select</span>
+  <span>yaw:45° pitch:-2.3° fov:75°</span>
+</div>
+
+</body>
+</html>

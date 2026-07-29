@@ -1,0 +1,95 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e3]: 360ImageStudio
+    - generic [ref=e4]:
+      - button "🌐 360 View" [ref=e5] [cursor=pointer]
+      - button "📐 Flat View" [ref=e6] [cursor=pointer]
+    - generic [ref=e7]: panorama_hotel_8k.jpg 8192 × 4096 • 12.4 MB
+  - generic [ref=e8]:
+    - generic [ref=e9]:
+      - generic [ref=e10]: Tools
+      - button "🖊️ Brush Mask" [ref=e11] [cursor=pointer]:
+        - generic [ref=e12]: 🖊️
+        - text: Brush Mask
+      - spinbutton "Brush size (px)" [ref=e14]: "40"
+      - button "⬜ Rectangle Select" [ref=e15] [cursor=pointer]:
+        - generic [ref=e16]: ⬜
+        - text: Rectangle Select
+      - button "✏️ Lasso" [ref=e17] [cursor=pointer]:
+        - generic [ref=e18]: ✏️
+        - text: Lasso
+      - button "↩️ Undo" [ref=e19] [cursor=pointer]:
+        - generic [ref=e20]: ↩️
+        - text: Undo
+      - generic [ref=e21]: Horizon
+      - generic [ref=e22]:
+        - text: "Roll:"
+        - strong [ref=e23]: 0.0°
+        - slider "Phase 2" [disabled] [ref=e24]: "50"
+      - generic [ref=e25]:
+        - text: "Pitch:"
+        - strong [ref=e26]: 0.0°
+        - slider "Phase 2" [disabled] [ref=e27]: "50"
+      - generic [ref=e28]:
+        - text: "Yaw:"
+        - strong [ref=e29]: 0.0°
+        - slider "Phase 2" [disabled] [ref=e30]: "50"
+      - generic [ref=e31]: Project
+      - button "💾 Save Project" [ref=e32] [cursor=pointer]:
+        - generic [ref=e33]: 💾
+        - text: Save Project
+      - button "📤 Export Image..." [ref=e34] [cursor=pointer]:
+        - generic [ref=e35]: 📤
+        - text: Export Image...
+    - generic [ref=e36]:
+      - generic [ref=e37]: "🔒 View Locked — Editing Layer #1"
+      - generic [ref=e39]:
+        - generic:
+          - generic: 🌐
+          - text: Equirectangular Panorama 8192 × 4096
+      - generic [ref=e40]:
+        - generic [ref=e41]: Before
+        - slider [ref=e42]: "30"
+        - generic [ref=e43]: After
+        - generic [ref=e44]: Preview
+    - generic [ref=e45]:
+      - generic [ref=e46]:
+        - text: Layers
+        - generic [ref=e47]: 3 layers
+      - generic [ref=e48]:
+        - generic [ref=e49] [cursor=pointer]:
+          - generic [ref=e50]: 🖼️
+          - generic [ref=e51]:
+            - generic [ref=e52]: "Edit #3 — \"thay bãi đất...\""
+            - generic [ref=e53]: 360° View • 2 min ago
+          - generic [ref=e54]:
+            - button "👁️" [ref=e55]
+            - button "🗑️" [ref=e56]
+        - generic [ref=e57] [cursor=pointer]:
+          - generic [ref=e58]: 🖼️
+          - generic [ref=e59]:
+            - generic [ref=e60]: "Edit #2 — \"xóa xe máy\""
+            - generic [ref=e61]: Flat View • 5 min ago
+          - generic [ref=e62]:
+            - button "👁️" [ref=e63]
+            - button "🗑️" [ref=e64]
+        - generic [ref=e65] [cursor=pointer]:
+          - generic [ref=e66]: 🖼️
+          - generic [ref=e67]:
+            - generic [ref=e68]: "Edit #1 — \"remove person\""
+            - generic [ref=e69]: 360° View • 8 min ago
+          - generic [ref=e70]:
+            - button "👁️" [ref=e71]
+            - button "🗑️" [ref=e72]
+      - generic [ref=e73]:
+        - generic [ref=e74]: Before/After
+        - slider [ref=e75]: "0"
+        - generic [ref=e76]: drag
+  - generic [ref=e77]:
+    - 'textbox "Nhập prompt... (VD: xóa xe máy, thay bãi đất thành công viên)" [ref=e78]': xóa xe máy trước cửa khách sạn
+    - generic [ref=e79]: "38"
+    - button "👁 Preview" [ref=e80] [cursor=pointer]
+    - button "✅ Apply" [ref=e81] [cursor=pointer]
+  - generic [ref=e82]:
+    - generic [ref=e83]: project.360project — 3 layers
+    - generic [ref=e84]: Auto-saved 30s ago

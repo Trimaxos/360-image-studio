@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>State 1: Viewer Free — 360 Image Studio</title>
+<style>
+  :root {
+    --bg: #1a1a2e; --panel: #16213e; --surface: #0f3460;
+    --accent: #e94560; --accent2: #533483; --text: #eee;
+    --text2: #aab; --border: #2a2a4a; --success: #00c853;
+    --radius: 8px; --font: system-ui, -apple-system, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--font); background: var(--bg); color: var(--text);
+    height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+  }
+  #topbar {
+    display: flex; align-items: center; gap: 12px; padding: 8px 16px;
+    background: var(--panel); border-bottom: 1px solid var(--border); min-height: 48px;
+  }
+  #topbar .logo { font-weight: 700; font-size: 16px; color: var(--accent); letter-spacing: -0.5px; }
+  #topbar .logo span { color: var(--text2); font-weight: 400; }
+  .tab-switcher {
+    display: flex; background: var(--bg); border-radius: var(--radius);
+    padding: 3px; margin: 0 auto 0 24px;
+  }
+  .tab-switcher button {
+    padding: 6px 18px; border: none; background: transparent;
+    color: var(--text2); border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500;
+  }
+  .tab-switcher button.active { background: var(--accent); color: #fff; }
+  .file-info { font-size: 12px; color: var(--text2); text-align: right; line-height: 1.4; }
+  #main { display: flex; flex: 1; overflow: hidden; }
+  #left-panel {
+    width: 220px; background: var(--panel); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; padding: 12px; gap: 8px; overflow-y: auto;
+  }
+  .panel-title {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px;
+    color: var(--text2); margin: 8px 0 4px; font-weight: 600;
+  }
+  .tool-btn {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    background: var(--bg); border: 1px solid transparent; border-radius: var(--radius);
+    color: var(--text); cursor: pointer; font-size: 13px; width: 100%; text-align: left;
+    transition: all .15s;
+  }
+  .tool-btn:hover { border-color: var(--border); }
+  .tool-btn .icon { width: 20px; text-align: center; font-size: 16px; }
+  .tool-btn.disabled { opacity: 0.4; pointer-events: none; }
+  #center {
+    flex: 1; display: flex; flex-direction: column; background: #000;
+    position: relative; min-width: 0;
+  }
+  #viewer-container {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    position: relative;
+    background: radial-gradient(ellipse at center, #1a1a2e 0%, #000 70%);
+  }
+  /* Square 1:1 viewer area */
+  #viewer-square {
+    aspect-ratio: 1/1;
+    width: min(75vh, 75%);
+    max-height: 90%;
+    background: linear-gradient(135deg, #2a3a5e 0%, #1a2a4e 30%, #0a1a2e 60%, #1a2a4e 100%);
+    border-radius: 4px; position: relative; overflow: hidden;
+    border: 1px solid #2a2a4a;
+  }
+  #viewer-square::before {
+    content: ''; position: absolute; inset: 0;
+    background:
+      linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+  .viewer-center {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    color: var(--text2); font-size: 14px; text-align: center; pointer-events: none;
+  }
+  .viewer-center .big { font-size: 48px; display: block; margin-bottom: 8px; opacity: 0.6; }
+  /* Rotation hint */
+  .rotate-hint {
+    position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,.7); color: var(--text2); padding: 6px 16px;
+    border-radius: 20px; font-size: 11px; pointer-events: none;
+  }
+  /* Edit button floating */
+  .edit-here-btn {
+    position: absolute; bottom: 50px; left: 50%; transform: translateX(-50%);
+    background: var(--accent); color: #fff; border: none;
+    padding: 10px 24px; border-radius: 24px; font-size: 14px; font-weight: 600;
+    cursor: pointer; z-index: 10; box-shadow: 0 4px 20px rgba(233,69,96,.4);
+    transition: all .15s;
+  }
+  .edit-here-btn:hover { filter: brightness(1.1); transform: translateX(-50%) scale(1.03); }
+  #right-panel {
+    width: 260px; background: var(--panel); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow-y: auto;
+  }
+  .panel-header {
+    padding: 12px; font-weight: 600; font-size: 13px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .layer-list { flex: 1; overflow-y: auto; }
+  .layer-item {
+    padding: 10px 12px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px; font-size: 12px;
+    transition: background .15s;
+  }
+  .layer-item:hover { background: var(--surface); }
+  .layer-thumb {
+    width: 44px; height: 33px; background: var(--bg); border-radius: 3px;
+    flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 10px; color: var(--text2);
+  }
+  .layer-info { flex: 1; min-width: 0; }
+  .layer-info .name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .layer-info .meta { color: var(--text2); font-size: 11px; margin-top: 2px; }
+  .layer-actions { display: flex; gap: 4px; }
+  .layer-actions button {
+    background: none; border: none; color: var(--text2);
+    cursor: pointer; font-size: 14px; padding: 2px;
+  }
+  .layer-actions button:hover { color: var(--text); }
+  .layer-actions button.visible { color: var(--success); }
+  .layer-actions button.hidden { color: #555; }
+  #bottombar {
+    background: var(--panel); border-top: 1px solid var(--border);
+    padding: 10px 16px; display: flex; gap: 10px; align-items: center;
+  }
+  #bottombar textarea {
+    flex: 1; background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--radius); color: var(--text); padding: 10px 14px;
+    font-size: 13px; font-family: var(--font); resize: none; min-height: 42px;
+  }
+  #bottombar textarea::placeholder { color: #555; }
+  #bottombar textarea:focus { outline: none; border-color: var(--accent); }
+  .btn {
+    padding: 10px 20px; border: none; border-radius: var(--radius);
+    cursor: pointer; font-weight: 600; font-size: 13px; white-space: nowrap;
+    transition: all .15s;
+  }
+  .btn-preview { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+  .btn-preview:hover { border-color: var(--accent); }
+  .btn-apply { background: var(--accent); color: #fff; }
+  .btn-apply:hover { filter: brightness(1.1); }
+  .btn:disabled { opacity: 0.4; pointer-events: none; }
+  #statusbar {
+    background: var(--bg); border-top: 1px solid var(--border);
+    padding: 4px 16px; display: flex; justify-content: space-between;
+    font-size: 11px; color: var(--text2);
+  }
+  /* Step indicator */
+  .step-indicator {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 6px; z-index: 10;
+  }
+  .step-dot {
+    width: 8px; height: 8px; border-radius: 50%; background: #333;
+    transition: all .3s;
+  }
+  .step-dot.active { background: var(--accent); }
+  .step-dot.done { background: var(--success); }
+  .step-label {
+    position: absolute; top: 28px; left: 50%; transform: translateX(-50%);
+    font-size: 11px; color: var(--text2); white-space: nowrap; z-index: 10;
+  }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div class="logo">360<span>ImageStudio</span></div>
+  <div class="tab-switcher">
+    <button class="active">🌐 360 View</button>
+    <button>📐 Flat View</button>
+  </div>
+  <div class="file-info">panorama_hotel_8k.jpg<br>8192 × 4096 • 12.4 MB</div>
+</div>
+
+<div id="main">
+  <!-- LEFT PANEL -->
+  <div id="left-panel">
+    <div class="panel-title">Selection</div>
+    <button class="tool-btn">
+      <span class="icon">⬜</span> Rectangle Select
+    </button>
+    <button class="tool-btn disabled">
+      <span class="icon">🖊️</span> Brush Mask
+    </button>
+    <button class="tool-btn disabled">
+      <span class="icon">✏️</span> Lasso
+    </button>
+    <button class="tool-btn">
+      <span class="icon">↩️</span> Undo
+    </button>
+
+    <div class="panel-title" style="margin-top:16px;">Horizon</div>
+    <div style="font-size:11px;color:var(--text2);padding:4px 0;">Roll: <strong>0.0°</strong></div>
+    <div style="font-size:11px;color:var(--text2);padding:4px 0;">Pitch: <strong>0.0°</strong></div>
+    <div style="font-size:11px;color:var(--text2);padding:4px 0;">Yaw: <strong>0.0°</strong></div>
+
+    <div class="panel-title" style="margin-top:16px;">Project</div>
+    <button class="tool-btn"><span class="icon">💾</span> Save Project</button>
+    <button class="tool-btn"><span class="icon">📤</span> Export Image...</button>
+  </div>
+
+  <!-- CENTER: VIEWER (FREE ROTATION) -->
+  <div id="center">
+    <div class="step-indicator">
+      <span class="step-dot active"></span>
+      <span class="step-dot"></span>
+      <span class="step-dot"></span>
+      <span class="step-dot"></span>
+    </div>
+    <div class="step-label">① Xoay viewer → chọn góc</div>
+
+    <div id="viewer-container">
+      <div id="viewer-square">
+        <div class="viewer-center">
+          <span class="big">🌐</span>
+          Equirectangular Panorama
+        </div>
+        <div class="rotate-hint">🖱 Kéo để xoay • Cuộn để zoom</div>
+      </div>
+      <button class="edit-here-btn">🔒 Edit Here</button>
+    </div>
+  </div>
+
+  <!-- RIGHT: LAYERS -->
+  <div id="right-panel">
+    <div class="panel-header">
+      Layers
+      <span style="font-size:11px;color:var(--text2);">3 layers</span>
+    </div>
+    <div class="layer-list">
+      <div class="layer-item">
+        <div class="layer-thumb">🖼️</div>
+        <div class="layer-info">
+          <div class="name">Edit #3 — "thay bãi đất..."</div>
+          <div class="meta">360° View • 2 min ago</div>
+        </div>
+        <div class="layer-actions">
+          <button class="visible" title="Hide layer">👁️</button>
+          <button title="Delete">🗑️</button>
+        </div>
+      </div>
+      <div class="layer-item">
+        <div class="layer-thumb">🖼️</div>
+        <div class="layer-info">
+          <div class="name">Edit #2 — "xóa xe máy"</div>
+          <div class="meta">Flat View • 5 min ago</div>
+        </div>
+        <div class="layer-actions">
+          <button class="visible" title="Hide layer">👁️</button>
+          <button title="Delete">🗑️</button>
+        </div>
+      </div>
+      <div class="layer-item">
+        <div class="layer-thumb">🖼️</div>
+        <div class="layer-info">
+          <div class="name">Edit #1 — "remove person"</div>
+          <div class="meta">360° View • 8 min ago</div>
+        </div>
+        <div class="layer-actions">
+          <button class="visible" title="Hide layer">👁️</button>
+          <button title="Delete">🗑️</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="bottombar">
+  <textarea placeholder="Chọn Rectangle Select → vẽ vùng → Apply → sau đó nhập prompt..." disabled></textarea>
+  <button class="btn btn-preview" disabled>👁 Preview</button>
+  <button class="btn btn-apply" disabled>✅ Apply</button>
+</div>
+
+<div id="statusbar">
+  <span>🟢 Viewer tự do — xoay để tìm góc cần sửa</span>
+  <span>project.360project</span>
+</div>
+
+</body>
+</html>
