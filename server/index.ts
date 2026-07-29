@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { config } from './config';
 import { translatePrompt } from './services/translate';
+import { imageRouter } from './routes/image';
 import type { TranslateRequest, TranslateResponse } from '../shared/types';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -14,6 +15,9 @@ app.use(express.json({ limit: '100mb' }));
 
 // Health check
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
+
+// Image routes
+app.use('/api/image', imageRouter);
 
 // Translate VN → EN
 app.post('/api/ai/translate', async (req, res) => {
