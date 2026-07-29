@@ -7,7 +7,7 @@ import { createInterface } from 'readline';
 import { config } from './config';
 import { imageRouter } from './routes/image';
 import { aiRouter } from './routes/ai';
-// import { projectRouter } from './routes/project';  // ← Bỏ comment ở Task 6
+import { projectRouter } from './routes/project';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -21,7 +21,7 @@ app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
 // API routes
 app.use('/api/image', imageRouter);
 app.use('/api/ai', aiRouter);
-// app.use('/api/project', projectRouter);  // ← Bỏ comment ở Task 6
+app.use('/api/project', projectRouter);
 
 // Static + SPA fallback (keep at bottom)
 const clientDist = path.join(__dirname, '..', 'dist', 'client');
