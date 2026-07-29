@@ -2,26 +2,40 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { config } from './config';
+import { translatePrompt } from './services/translate';
+import type { TranslateRequest, TranslateResponse } from '../shared/types';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const PORT = process.env.PORT || 3001;
 
 app.use(cors());
 app.use(express.json({ limit: '100mb' }));
 
-// API routes (will be added in later tasks)
-app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok' });
+// Health check
+app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
+
+// Translate VN → EN
+app.post('/api/ai/translate', async (req, res) => {
+  try {
+    const { text } = req.body as TranslateRequest;
+    if (!text?.trim()) {
+      return res.status(400).json({ error: 'text is required' });
+    }
+    const result = await translatePrompt(text);
+    res.json(result as TranslateResponse);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Serve static client build in production
+// Static + SPA fallback (keep at bottom)
 const clientDist = path.join(__dirname, '..', 'dist', 'client');
 app.use(express.static(clientDist));
 app.get('{*splat}', (_req, res) => {
   res.sendFile(path.join(clientDist, 'index.html'));
 });
 
-app.listen(PORT, () => {
-  console.log(`360 Image Studio running on http://localhost:${PORT}`);
+app.listen(config.port, () => {
+  console.log(`360 Image Studio running on http://localhost:${config.port}`);
 });
