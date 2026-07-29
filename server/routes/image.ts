@@ -1,5 +1,8 @@
 import { Router } from 'express';
-import { openImage, getTile, serveImage, exportImage } from '../services/image-processor';
+import { createHash } from 'crypto';
+import path from 'path';
+import fs from 'fs/promises';
+import { openImage, getTile, serveImage, exportImage, CACHE_DIR } from '../services/image-processor';
 import type { ImageOpenRequest, ImageOpenResponse, TileRequest, ExportRequest } from '../../shared/types';
 
 export const imageRouter = Router();
@@ -41,6 +44,21 @@ imageRouter.get('/tile', async (req, res) => {
       Number(h)
     );
     res.type('image/png').send(tile);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+imageRouter.post('/cache-result', async (req, res) => {
+  try {
+    const { base64Image } = req.body;
+    if (!base64Image) return res.status(400).json({ error: 'base64Image is required' });
+    const buffer = Buffer.from(base64Image, 'base64');
+    const hash = createHash('sha256').update(buffer).digest('hex');
+    const cacheFile = path.join(CACHE_DIR, `${hash}.png`);
+    await fs.mkdir(path.dirname(cacheFile), { recursive: true });
+    await fs.writeFile(cacheFile, buffer);
+    res.json({ resultImageId: hash, sizeBytes: buffer.length });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

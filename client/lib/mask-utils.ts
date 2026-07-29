@@ -42,3 +42,44 @@ export function maskToBoundingBox(shapes: MaskShape[]): { x: number; y: number; 
 
 // Convert Fabric.js canvas to MaskShape[] — defined in Task 13 (fabricToMaskData)
 // See Task 13 Step 2 for the full implementation re-exported from here
+
+import type { MaskShape as SharedMaskShape } from '../../shared/types';
+
+export function fabricToMaskData(fabricCanvas: any): SharedMaskShape[] {
+  const shapes: SharedMaskShape[] = [];
+  const objects = fabricCanvas.getObjects();
+
+  for (const obj of objects) {
+    if (obj.type === 'path') {
+      // Brush stroke
+      shapes.push({
+        type: 'brush',
+        points: obj.path?.map((p: any) => ({ x: p[1], y: p[2] })) ?? [],
+      });
+    } else if (obj.type === 'rect') {
+      shapes.push({ type: 'rect', x: obj.left, y: obj.top, w: obj.width! * obj.scaleX!, h: obj.height! * obj.scaleY! });
+    }
+  }
+
+  return shapes;
+}
+
+export interface RectWithResolution {
+  viewport: { x: number; y: number; w: number; h: number };
+  native: { w: number; h: number };  // real pixel size at original resolution
+}
+
+export function calcNativeResolution(
+  viewportRect: { x: number; y: number; w: number; h: number },
+  viewportSize: { w: number; h: number },
+  imageSize: { w: number; h: number },
+  scale: number       // scale factor between viewport and image
+): RectWithResolution {
+  return {
+    viewport: viewportRect,
+    native: {
+      w: Math.round(viewportRect.w * scale),
+      h: Math.round(viewportRect.h * scale),
+    },
+  };
+}
