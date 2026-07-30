@@ -69,8 +69,21 @@ export default function PromptBar() {
     const selection = state.selectionDraft;
     if (!selectedVariant || !selection) return;
     setError('');
+    state.setWorkflow('generating'); // show loading state during reprojection
     try {
       const { resultImageId } = await api.image.saveResultCache(selectedVariant.base64Result);
+
+      // For perspective layers, reproject immediately so 360 view has the equirectangular buffer ready
+      let equirectImageId: string | undefined;
+      if (selection.sourceView === '360') {
+        const reprojResult = await api.image.reproject({
+          resultImageId,
+          selection,
+          imagePath: state.imagePath!,
+        });
+        equirectImageId = reprojResult.equirectImageId;
+      }
+
       const existing = state.activeLayerId ? state.layers.find((layer) => layer.id === state.activeLayerId) : null;
       const layer: Layer = {
         id: existing?.id ?? crypto.randomUUID(),
@@ -82,6 +95,7 @@ export default function PromptBar() {
         maskData: existing?.maskData ?? [],
         prompt,
         resultImageId,
+        equirectImageId,
         status: 'committed',
         selection: { ...selection, prompt },
       };

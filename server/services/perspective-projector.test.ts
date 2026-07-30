@@ -30,13 +30,10 @@ test('calcPerspectiveResolution full-frame on 8K panorama at 90° FOV', () => {
     { x: 0, y: 0, width: 800, height: 600 },
     { width: 8000, height: 4000 },
   );
-  // hFov_deg = 2 * atan(800/600 * tan(90/2)) * 180/pi
-  // = 2 * atan(1.333 * 1) * 180/pi
-  // = 2 * 53.13 * 180/pi ≈ 106.26°
-  // fullPerspWidth = 106.26 * 8000 / 360 ≈ 2361
-  // fullPerspHeight = 90 * 4000 / 180 = 2000
-  assert.ok(Math.abs(result.width - 2361) < 5, `width=${result.width}`);
+  // outHeight = (600/600) * (90 * 4000 / 180) = 2000
+  // outWidth = 2000 * 800 / 600 = 2667
   assert.equal(result.height, 2000);
+  assert.equal(result.width, 2667);
 });
 
 test('calcPerspectiveResolution free-select on 8K panorama', () => {
@@ -47,10 +44,10 @@ test('calcPerspectiveResolution free-select on 8K panorama', () => {
     { x: 200, y: 150, width: 400, height: 300 },
     { width: 8000, height: 4000 },
   );
-  // Full perspective: ~2361 × 2000
-  // Rect = 50% of viewport in both axes → ~1181 × 1000
-  assert.ok(Math.abs(result.width - 1181) < 5, `width=${result.width}`);
+  // outHeight = (300/600) * (90 * 4000 / 180) = 1000
+  // outWidth = 1000 * 400 / 300 = 1333
   assert.equal(result.height, 1000);
+  assert.equal(result.width, 1333);
 });
 
 test('calcPerspectiveResolution with narrow FOV produces smaller output', () => {

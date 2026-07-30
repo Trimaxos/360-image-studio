@@ -105,9 +105,21 @@ export async function exportImage(
         await fs.access(cacheFile);
 
         if (layer.type === 'perspective') {
-          const { projectPerspectiveLayer } = await import('./perspective-projector');
-          const projected = await projectPerspectiveLayer(cacheFile, layer, panoramaSize);
-          pipeline = pipeline.composite([{ input: projected, top: 0, left: 0, blend: 'over' }]);
+          // Prefer pre-rendered equirectangular buffer
+          if (layer.equirectImageId) {
+            const eqFile = path.join(CACHE_DIR, `${layer.equirectImageId}.png`);
+            try {
+              await fs.access(eqFile);
+              pipeline = pipeline.composite([{ input: eqFile, top: 0, left: 0, blend: 'over' }]);
+              continue;
+            } catch {
+              // File missing — fall through to reproject
+            }
+          }
+          // Fallback: reproject at composite time (legacy layers, or if equirectImageId missing)
+          const { reprojectToEquirectangular } = await import('./perspective-projector');
+          const reprojected = await reprojectToEquirectangular(cacheFile, layer, panoramaSize);
+          pipeline = pipeline.composite([{ input: reprojected, top: 0, left: 0, blend: 'over' }]);
           continue;
         }
 

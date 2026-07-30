@@ -53,6 +53,8 @@ export const api = {
       mode: 'full-frame' | 'free-select';
     }) =>
       request<{ resultImageId: string; width: number; height: number }>('POST', '/image/perspective-render', body),
+    reproject: (body: import('../../shared/types').ReprojectRequest) =>
+      request<import('../../shared/types').ReprojectResponse>('POST', '/image/reproject', body),
     cacheUrl: (id: string) =>
       `${BASE}/image/cache/${encodeURIComponent(id)}`,
     // Upload image file from browser — returns { path, width, height, originalName }

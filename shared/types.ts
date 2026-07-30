@@ -80,6 +80,7 @@ export interface Layer {
 
   prompt: string;
   resultImageId: string;  // filename in cache dir (SHA256 hash of result image)
+  equirectImageId?: string;  // filename in cache dir (reprojected equirectangular buffer)
   status?: 'draft' | 'committed';
   name?: string;
   selection?: SelectionDraft;
@@ -108,6 +109,16 @@ export interface PerspectiveRenderResponse {
   resultImageId: string;
   width: number;
   height: number;
+}
+
+export interface ReprojectRequest {
+  resultImageId: string;
+  selection: SelectionDraft;
+  imagePath: string;
+}
+
+export interface ReprojectResponse {
+  equirectImageId: string;
 }
 
 export interface GeneratedVariant {

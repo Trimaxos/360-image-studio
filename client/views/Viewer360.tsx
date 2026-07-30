@@ -84,17 +84,18 @@ export default function Viewer360() {
         ref={containerRef}
         className="viewer-viewport"
         style={{ transform: `rotate(${viewPose.roll}deg)` }}
-      />
+      >
+        {workflow === 'rect-select' && (
+          <>
+            <div className="lock-badge">
+              🔒 Locked · yaw {viewPose.yaw.toFixed(1)}° · pitch {viewPose.pitch.toFixed(1)}° · fov {viewPose.fov.toFixed(0)}°
+            </div>
+            <RectSelectionOverlay sourceView="360" />
+          </>
+        )}
+      </div>
       {ready && workflow === 'viewing' && (
         <button className="edit-here-btn" onClick={editHere}>🔒 Edit Here</button>
-      )}
-      {workflow === 'rect-select' && (
-        <>
-          <div className="lock-badge">
-            🔒 Locked · yaw {viewPose.yaw.toFixed(1)}° · pitch {viewPose.pitch.toFixed(1)}° · fov {viewPose.fov.toFixed(0)}°
-          </div>
-          <RectSelectionOverlay sourceView="360" />
-        </>
       )}
     </div>
   );

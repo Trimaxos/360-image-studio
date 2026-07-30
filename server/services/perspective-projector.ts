@@ -13,22 +13,19 @@ export function calcPerspectiveResolution(
   rect: { x: number; y: number; width: number; height: number },
   panorama: Size,
 ): Size {
-  const aspect = viewport.width / viewport.height;
-  const halfFovRad = radians(pose.fov) / 2;
+  // Vertical resolution: rect covers rect.height/viewport.height of the vertical FOV.
+  // Each degree of latitude = panorama.height / 180 equirectangular pixels.
+  // outHeight = rect's share of vertical FOV × pixels per degree.
+  const outHeight = Math.max(1, Math.round(
+    (rect.height / viewport.height) * (pose.fov * panorama.height / 180),
+  ));
 
-  // Horizontal FOV from vertical FOV + aspect ratio (reverse of projectScreenPoint)
-  const hFovRad = 2 * Math.atan(aspect * Math.tan(halfFovRad));
-  const hFovDeg = hFovRad * 180 / Math.PI;
+  // Width derived from rect's own aspect ratio — not viewport's.
+  // This ensures the perspective output preserves the selection proportions
+  // for both full-frame and free-select modes.
+  const outWidth = Math.max(1, Math.round(outHeight * rect.width / rect.height));
 
-  // Full perspective view resolution matching source pixel density
-  const fullPerspWidth = hFovDeg * panorama.width / 360;
-  const fullPerspHeight = pose.fov * panorama.height / 180;
-
-  // Scale by rect proportion of viewport
-  return {
-    width: Math.max(1, Math.round((rect.width / viewport.width) * fullPerspWidth)),
-    height: Math.max(1, Math.round((rect.height / viewport.height) * fullPerspHeight)),
-  };
+  return { width: outWidth, height: outHeight };
 }
 
 export async function renderPerspective(
@@ -174,7 +171,12 @@ export function projectScreenPoint(
   };
 }
 
-export async function projectPerspectiveLayer(
+/**
+ * Inverse mapping: reproject perspective result back to equirectangular.
+ * Iterates over equirectangular bounding box → inverse rotate → NDC → bilinear sample from source.
+ * No holes, proper antialiasing, ~10× faster than forward mapping.
+ */
+export async function reprojectToEquirectangular(
   resultPath: string,
   layer: Layer,
   panorama: Size,
@@ -182,53 +184,192 @@ export async function projectPerspectiveLayer(
   const selection = layer.selection;
   if (!selection) throw new Error(`Perspective layer ${layer.id} is missing selection projection data`);
 
-  const { data, info } = await sharp(resultPath).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  let mask: Buffer | null = null;
+  // Load source result + apply mask if present
+  const { data: rawData, info } = await sharp(resultPath).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const rw = info.width;
+  const rh = info.height;
+
+  // Pre-mask the source: if maskBase64 provided, bake it into alpha
+  let sourceData: Buffer;
   if (selection.maskBase64) {
-    mask = await sharp(Buffer.from(selection.maskBase64, 'base64'))
-      .resize(info.width, info.height, { fit: 'fill' })
+    const mask = await sharp(Buffer.from(selection.maskBase64, 'base64'))
+      .resize(rw, rh, { fit: 'fill' })
       .greyscale()
       .raw()
       .toBuffer();
+    const masked = Buffer.alloc(rw * rh * 4);
+    for (let i = 0; i < rw * rh; i++) {
+      const si = i * 4;
+      masked[si] = rawData[si];
+      masked[si + 1] = rawData[si + 1];
+      masked[si + 2] = rawData[si + 2];
+      masked[si + 3] = mask[i];
+    }
+    sourceData = masked;
+  } else {
+    sourceData = rawData;
   }
 
-  const output = Buffer.alloc(panorama.width * panorama.height * 4);
+  const { width: panoW, height: panoH } = panorama;
+  const viewport = selection.viewport;
   const rect = selection.rect;
-  const feather = Math.max(1, Math.min(8, Math.floor(Math.min(info.width, info.height) / 8)));
+  const pose = selection.viewPose;
 
-  for (let sourceY = 0; sourceY < info.height; sourceY += 1) {
-    for (let sourceX = 0; sourceX < info.width; sourceX += 1) {
-      const sourceIndex = (sourceY * info.width + sourceX) * 4;
-      const maskAlpha = mask ? mask[sourceY * info.width + sourceX] : data[sourceIndex + 3];
-      if (maskAlpha < 2) continue;
-      const edge = Math.min(sourceX, sourceY, info.width - 1 - sourceX, info.height - 1 - sourceY);
-      const featherAlpha = Math.min(1, (edge + 1) / feather);
-      const alpha = Math.round(maskAlpha * featherAlpha);
-      const screenPoint = {
-        x: rect.x + (sourceX + 0.5) / info.width * rect.width,
-        y: rect.y + (sourceY + 0.5) / info.height * rect.height,
-      };
-      const projected = projectScreenPoint(screenPoint, selection.viewport, selection.viewPose, panorama);
-      const targetX = Math.round(projected.x) % panorama.width;
-      const targetY = Math.round(projected.y);
+  // Precompute inverse rotation angles
+  const rollRad = radians(pose.roll);
+  const pitchRad = radians(pose.pitch);
+  const yawRad = radians(pose.yaw);
+  const cosRoll = Math.cos(rollRad);
+  const sinRoll = Math.sin(rollRad);
+  const cosPitch = Math.cos(pitchRad);
+  const sinPitch = Math.sin(pitchRad);
+  const cosYaw = Math.cos(yawRad);
+  const sinYaw = Math.sin(yawRad);
 
-      // A small splat prevents pinholes caused by forward projection.
-      for (let offsetY = 0; offsetY <= 1; offsetY += 1) {
-        for (let offsetX = 0; offsetX <= 1; offsetX += 1) {
-          const px = (targetX + offsetX) % panorama.width;
-          const py = Math.min(panorama.height - 1, targetY + offsetY);
-          const targetIndex = (py * panorama.width + px) * 4;
-          if (alpha < output[targetIndex + 3]) continue;
-          output[targetIndex] = data[sourceIndex];
-          output[targetIndex + 1] = data[sourceIndex + 1];
-          output[targetIndex + 2] = data[sourceIndex + 2];
-          output[targetIndex + 3] = alpha;
+  // Projection constants (must match renderPerspective)
+  const aspect = viewport.width / viewport.height;
+  const tanHalfFov = Math.tan(radians(pose.fov) / 2);
+
+  // Compute y-bounding box in equirectangular space from 12 sample points
+  const samples = [
+    { x: rect.x, y: rect.y },
+    { x: rect.x + rect.width * 0.25, y: rect.y },
+    { x: rect.x + rect.width * 0.5, y: rect.y },
+    { x: rect.x + rect.width * 0.75, y: rect.y },
+    { x: rect.x + rect.width, y: rect.y },
+    { x: rect.x, y: rect.y + rect.height * 0.5 },
+    { x: rect.x + rect.width, y: rect.y + rect.height * 0.5 },
+    { x: rect.x, y: rect.y + rect.height },
+    { x: rect.x + rect.width * 0.25, y: rect.y + rect.height },
+    { x: rect.x + rect.width * 0.5, y: rect.y + rect.height },
+    { x: rect.x + rect.width * 0.75, y: rect.y + rect.height },
+    { x: rect.x + rect.width, y: rect.y + rect.height },
+  ];
+  const projected = samples.map(p => projectScreenPoint(p, viewport, pose, panorama));
+  let yMin = Infinity, yMax = -Infinity;
+  for (const p of projected) {
+    if (p.y < yMin) yMin = p.y;
+    if (p.y > yMax) yMax = p.y;
+  }
+  const pad = 2;
+  yMin = Math.max(0, Math.floor(yMin) - pad);
+  yMax = Math.min(panoH - 1, Math.ceil(yMax) + pad);
+
+  // Detect x-wrapping from projected x values.
+  // The largest gap between consecutive sorted xs is the UNVIEWED area.
+  // The VIEWED area is its complement — either one contiguous range or two wrapping ranges.
+  const xs = projected.map(p => p.x);
+  xs.sort((a, b) => a - b);
+  let maxGap = -1, maxGapIdx = -1;
+  for (let i = 0; i < xs.length - 1; i++) {
+    const gap = xs[i + 1] - xs[i];
+    if (gap > maxGap) { maxGap = gap; maxGapIdx = i; }
+  }
+  const circGap = (xs[0] + panoW) - xs[xs.length - 1];
+  if (circGap > maxGap) { maxGap = circGap; maxGapIdx = xs.length - 1; }
+
+  // Build x-ranges covering the VIEWED area
+  interface XRange { start: number; end: number }
+  let xRanges: XRange[];
+  if (maxGapIdx === xs.length - 1) {
+    // Unviewed area wraps 360° → viewed area is contiguous: xs[0] … xs[last]
+    xRanges = [{ start: Math.floor(xs[0]) - pad, end: Math.ceil(xs[xs.length - 1]) + pad }];
+  } else {
+    // Unviewed area is between xs[i] and xs[i+1] → viewed area wraps 360° in two ranges
+    xRanges = [
+      { start: Math.floor(xs[maxGapIdx + 1]) - pad, end: panoW - 1 },
+      { start: 0, end: Math.ceil(xs[maxGapIdx]) + pad },
+    ];
+  }
+  xRanges = xRanges
+    .map(r => ({ start: Math.max(0, r.start), end: Math.min(panoW - 1, r.end) }))
+    .filter(r => r.start <= r.end);
+
+  // Allocate output (transparent fill)
+  const output = Buffer.alloc(panoW * panoH * 4);
+  output.fill(0);
+
+  // Precompute sin/cos for each longitude column
+  const lonSin = new Float64Array(panoW);
+  const lonCos = new Float64Array(panoW);
+  for (let tx = 0; tx < panoW; tx++) {
+    const lon = (tx / panoW) * 2 * Math.PI - Math.PI;
+    lonSin[tx] = Math.sin(lon);
+    lonCos[tx] = Math.cos(lon);
+  }
+
+  // === Main inverse-mapping loop over equirectangular bounding box ===
+  for (let ty = yMin; ty <= yMax; ty++) {
+    const lat = Math.PI / 2 - (ty / panoH) * Math.PI;
+    const cosLat = Math.cos(lat);
+    const sinLat = Math.sin(lat);
+
+    for (const range of xRanges) {
+      for (let tx = range.start; tx <= range.end; tx++) {
+        const wrappedTx = ((tx % panoW) + panoW) % panoW;
+
+        // World direction from equirectangular coordinates
+        const cxW = cosLat * lonSin[wrappedTx];
+        const cyW = sinLat;
+        const czW = cosLat * lonCos[wrappedTx];
+
+        // ---- Inverse rotation: world → camera ----
+        // Forward: R_y(yaw) * R_x(-pitch) * R_z(roll)
+        // Inverse: R_z(-roll) * R_x(pitch) * R_y(-yaw)
+
+        // Step 1: R_y(-yaw)
+        const cx1 = cosYaw * cxW - sinYaw * czW;
+        const cz1 = sinYaw * cxW + cosYaw * czW;
+
+        // Step 2: R_x(pitch) — inverse of forward R_x(-pitch)
+        const cy2 = cosPitch * cyW - sinPitch * cz1;
+        const cz2 = sinPitch * cyW + cosPitch * cz1;
+
+        // Step 3: R_z(-roll)
+        const cx3 = cosRoll * cx1 + sinRoll * cy2;
+        const cy3 = -sinRoll * cx1 + cosRoll * cy2;
+        const cz3 = cz2;
+
+        if (cz3 <= 0) continue;
+
+        // Project to NDC
+        const ndcX = cx3 / (cz3 * aspect * tanHalfFov);
+        const ndcY = cy3 / (cz3 * tanHalfFov);
+
+        if (Math.abs(ndcX) > 1 || Math.abs(ndcY) > 1) continue;
+
+        // NDC → viewport → source pixel
+        const vpX = (ndcX + 1) / 2 * viewport.width;
+        const vpY = (1 - ndcY) / 2 * viewport.height;
+        const srcX = (vpX - rect.x) / rect.width * rw - 0.5;
+        const srcY = (vpY - rect.y) / rect.height * rh - 0.5;
+
+        if (srcX < -0.5 || srcX >= rw - 0.5 || srcY < -0.5 || srcY >= rh - 0.5) continue;
+
+        // Bilinear sample
+        const sx0 = Math.floor(srcX);
+        const sy0 = Math.floor(srcY);
+        const fx = srcX - sx0;
+        const fy = srcY - sy0;
+        const sx1 = Math.min(sx0 + 1, rw - 1);
+        const sy1 = Math.min(sy0 + 1, rh - 1);
+
+        const i00 = (sy0 * rw + sx0) * 4;
+        const i10 = (sy0 * rw + sx1) * 4;
+        const i01 = (sy1 * rw + sx0) * 4;
+        const i11 = (sy1 * rw + sx1) * 4;
+
+        const outIdx = (ty * panoW + wrappedTx) * 4;
+        for (let c = 0; c < 4; c++) {
+          const top = sourceData[i00 + c] * (1 - fx) + sourceData[i10 + c] * fx;
+          const bottom = sourceData[i01 + c] * (1 - fx) + sourceData[i11 + c] * fx;
+          output[outIdx + c] = Math.round(top * (1 - fy) + bottom * fy);
         }
       }
     }
   }
 
   return sharp(output, {
-    raw: { width: panorama.width, height: panorama.height, channels: 4 },
+    raw: { width: panoW, height: panoH, channels: 4 },
   }).png().toBuffer();
 }
