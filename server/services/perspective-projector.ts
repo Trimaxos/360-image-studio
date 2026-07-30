@@ -51,17 +51,17 @@ export async function renderPerspective(
   const aspect = viewport.width / viewport.height;
   const tanHalfFov = Math.tan(radians(viewPose.fov) / 2);
 
-  // Precompute inverse rotation angles
+  // Precompute forward rotation angles (must match projectScreenPoint)
   const rollRad = radians(viewPose.roll);
   const pitchRad = radians(viewPose.pitch);
   const yawRad = radians(viewPose.yaw);
 
-  const cosRoll = Math.cos(-rollRad);
-  const sinRoll = Math.sin(-rollRad);
-  const cosPitch = Math.cos(-pitchRad);
-  const sinPitch = Math.sin(-pitchRad);
-  const cosYaw = Math.cos(-yawRad);
-  const sinYaw = Math.sin(-yawRad);
+  const cosRoll = Math.cos(rollRad);
+  const sinRoll = Math.sin(rollRad);
+  const cosPitch = Math.cos(pitchRad);
+  const sinPitch = Math.sin(pitchRad);
+  const cosYaw = Math.cos(yawRad);
+  const sinYaw = Math.sin(yawRad);
 
   for (let py = 0; py < outSize.height; py++) {
     for (let px = 0; px < outSize.width; px++) {
@@ -80,17 +80,17 @@ export async function renderPerspective(
       const len = Math.hypot(cx, cy, cz);
       cx /= len; cy /= len; cz /= len;
 
-      // Inverse roll
+      // Roll (around Z) — forward rotation matching projectScreenPoint
       const rx = cx * cosRoll - cy * sinRoll;
       const ry = cx * sinRoll + cy * cosRoll;
       cx = rx; cy = ry;
 
-      // Inverse pitch
+      // Pitch (around X)
       const py2 = cy * cosPitch + cz * sinPitch;
       const pz2 = -cy * sinPitch + cz * cosPitch;
       cy = py2; cz = pz2;
 
-      // Inverse yaw
+      // Yaw (around Y)
       const yx = cx * cosYaw + cz * sinYaw;
       const yz = -cx * sinYaw + cz * cosYaw;
       cx = yx; cz = yz;

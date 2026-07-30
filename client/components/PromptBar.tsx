@@ -78,7 +78,7 @@ export default function PromptBar() {
         type: selection.sourceView === '360' ? 'perspective' : 'flat',
         visible: existing?.visible ?? true,
         ...selection.viewPose,
-        tileCoords: selection.tileCoords,
+        tileCoords: existing?.tileCoords ?? selection.tileCoords,
         maskData: existing?.maskData ?? [],
         prompt,
         resultImageId,
