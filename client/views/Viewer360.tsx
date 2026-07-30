@@ -1,104 +1,99 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { useProjectStore } from '../stores/project';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
+import { useProjectStore } from '../stores/project';
+import { degreesToRadians, radiansToDegrees } from '../components/view-controls';
+import RectSelectionOverlay from '../components/RectSelectionOverlay';
+import { useCompositePreview } from '../hooks/useCompositePreview';
 
 export default function Viewer360() {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<any>(null);
-  const imagePath = useProjectStore((s) => s.imagePath);
-  const isEditing = useProjectStore((s) => s.isEditing);
-  const viewLock = useProjectStore((s) => s.viewLock);
-  const setViewLock = useProjectStore((s) => s.setViewLock);
-  const setViewMode = useProjectStore((s) => s.setViewMode);
-  const setIsEditing = useProjectStore((s) => s.setIsEditing);
-  const [viewerReady, setViewerReady] = useState(false);
+  const applyingPoseRef = useRef(false);
+  const [ready, setReady] = useState(false);
+  const imagePath = useProjectStore((state) => state.imagePath);
+  const workflow = useProjectStore((state) => state.workflow);
+  const viewPose = useProjectStore((state) => state.viewPose);
+  const updateViewPose = useProjectStore((state) => state.updateViewPose);
+  const enterRectSelect = useProjectStore((state) => state.enterRectSelect);
+  const compositePreview = useCompositePreview();
 
-  // Init PSV with equirectangular image (NOT square tile)
   useEffect(() => {
     if (!containerRef.current || !imagePath) return;
-
+    let disposed = false;
     import('@photo-sphere-viewer/core').then(({ Viewer }) => {
-      if (viewerRef.current) {
-        viewerRef.current.destroy();
-      }
-
-      // Serve ảnh equirectangular giữ tỉ lệ 2:1
-      const panoramaUrl = api.image.serveUrl(imagePath, 4096);
-
+      if (disposed || !containerRef.current) return;
       const viewer = new Viewer({
-        container: containerRef.current!,
-        panorama: panoramaUrl,
+        container: containerRef.current,
+        panorama: api.image.serveUrl(imagePath, 4096),
         navbar: false,
-        defaultZoomLvl: 0,
+        defaultZoomLvl: 27.272727,
         minFov: 10,
         maxFov: 120,
       });
-
-      viewer.addEventListener('ready', () => {
-        setViewerReady(true);
+      viewer.addEventListener('ready', () => setReady(true));
+      viewer.addEventListener('position-updated', ({ position }: any) => {
+        if (applyingPoseRef.current || useProjectStore.getState().workflow !== 'viewing') return;
+        updateViewPose({
+          yaw: radiansToDegrees(position.yaw),
+          pitch: radiansToDegrees(position.pitch),
+        });
       });
-
+      viewer.addEventListener('zoom-updated', ({ zoomLevel }: any) => {
+        if (applyingPoseRef.current || useProjectStore.getState().workflow !== 'viewing') return;
+        updateViewPose({ fov: viewer.dataHelper.zoomLevelToFov(zoomLevel) });
+      });
       viewerRef.current = viewer;
     });
-
     return () => {
-      if (viewerRef.current) {
-        viewerRef.current.destroy();
-        viewerRef.current = null;
-        setViewerReady(false);
-      }
+      disposed = true;
+      viewerRef.current?.destroy();
+      viewerRef.current = null;
+      setReady(false);
     };
-  }, [imagePath]);
+  }, [imagePath, updateViewPose]);
 
-  // Lock rotation when editing
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer || !ready) return;
+    applyingPoseRef.current = true;
+    viewer.rotate({
+      yaw: degreesToRadians(viewPose.yaw),
+      pitch: degreesToRadians(viewPose.pitch),
+    });
+    viewer.zoom(viewer.dataHelper.fovToZoomLevel(viewPose.fov));
+    requestAnimationFrame(() => { applyingPoseRef.current = false; });
+  }, [viewPose.yaw, viewPose.pitch, viewPose.fov, ready]);
+
   useEffect(() => {
     if (!viewerRef.current) return;
-    const v = viewerRef.current;
-    if (isEditing) {
-      v.setOption('mousewheel', false);
-      v.setOption('mousemove', false);
-    } else {
-      v.setOption('mousewheel', true);
-      v.setOption('mousemove', true);
-    }
-  }, [isEditing]);
+    const unlocked = workflow === 'viewing';
+    viewerRef.current.setOption('mousemove', unlocked);
+    viewerRef.current.setOption('mousewheel', unlocked);
+  }, [workflow]);
 
-  // "Edit Here" — lock current view position
-  const handleEditHere = useCallback(() => {
-    if (!viewerRef.current) return;
-    const v = viewerRef.current;
-    const pos = v.getPosition();
-    setViewLock({
-      yaw: pos.yaw,
-      pitch: pos.pitch,
-      roll: pos.roll ?? 0,
-      fov: v.getZoomLevel(),
-    });
-    setIsEditing(true);
-    setViewMode('viewer'); // bắt đầu ở viewer mode, sau Rect Select sẽ chuyển sang canvas
-  }, [setViewLock, setIsEditing, setViewMode]);
+  useEffect(() => {
+    if (!viewerRef.current || !compositePreview || workflow !== 'viewing') return;
+    viewerRef.current.setPanorama(compositePreview, { transition: false, showLoader: false });
+  }, [compositePreview, workflow]);
+
+  const editHere = useCallback(() => enterRectSelect('360'), [enterRectSelect]);
 
   return (
     <div className="viewer-container">
-      {!imagePath ? (
-        <div className="placeholder">
-          <p>Mở ảnh panorama để bắt đầu</p>
-        </div>
-      ) : (
+      <div
+        ref={containerRef}
+        className="viewer-viewport"
+        style={{ transform: `rotate(${viewPose.roll}deg)` }}
+      />
+      {ready && workflow === 'viewing' && (
+        <button className="edit-here-btn" onClick={editHere}>🔒 Edit Here</button>
+      )}
+      {workflow === 'rect-select' && (
         <>
-          <div ref={containerRef} className="viewer-square" />
-          {/* Nút "Edit Here" — chỉ hiện khi chưa lock */}
-          {viewerReady && !isEditing && (
-            <button className="edit-here-btn" onClick={handleEditHere}>
-              🔒 Edit Here
-            </button>
-          )}
-          {/* Lock badge — hiển thị giá trị góc thực */}
-          {isEditing && viewLock && (
-            <div className="lock-badge">
-              🔒 Locked — yaw:{viewLock.yaw.toFixed(1)}° pitch:{viewLock.pitch.toFixed(1)}° fov:{viewLock.fov.toFixed(0)}°
-            </div>
-          )}
+          <div className="lock-badge">
+            🔒 Locked · yaw {viewPose.yaw.toFixed(1)}° · pitch {viewPose.pitch.toFixed(1)}° · fov {viewPose.fov.toFixed(0)}°
+          </div>
+          <RectSelectionOverlay sourceView="360" />
         </>
       )}
     </div>

@@ -1,0 +1,11 @@
+.git
+.codegraph
+.env
+artifacts
+dist
+docs
+mockups
+models
+node_modules
+.playwright-mcp
+.superpowers

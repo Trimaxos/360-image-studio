@@ -1,123 +1,77 @@
 import { config } from '../config';
 
-const FAL_BASE = 'https://fal.run';
-
-// ===== Provider Interface =====
-
 export interface AiProvider {
-  name: string;
-  edit(base64Image: string, base64Mask: string, prompt: string): Promise<{ base64Result: string; model: string }>;
-  isAvailable(): Promise<boolean>;
+  name: 'local' | 'fal';
+  modelId: string;
+  edit(image: string, mask: string, prompt: string): Promise<{ base64Result: string; model: string }>;
 }
 
-// ===== Local Provider: FLUX.1-Fill-dev GGUF (via Flask HTTP server) =====
-
-export class LocalAiProvider implements AiProvider {
-  name = 'local-flux1-fill';
-
-  async isAvailable(): Promise<boolean> {
-    if (!config.localAiEnabled) return false;
-    try {
-      const res = await fetch(`http://127.0.0.1:${config.localAiPort}/health`, {
-        signal: AbortSignal.timeout(3000),
-      });
-      const data = await res.json();
-      return data.status === 'ok';
-    } catch {
-      return false;
-    }
-  }
-
-  async edit(base64Image: string, base64Mask: string, prompt: string): Promise<{ base64Result: string; model: string }> {
-    const res = await fetch(`http://127.0.0.1:${config.localAiPort}/inpaint`, {
+class LocalProvider implements AiProvider {
+  name = 'local' as const;
+  constructor(public modelId: string) {}
+  async edit(base64Image: string, base64Mask: string, prompt: string) {
+    const response = await fetch(`${config.localAiBaseUrl}/inpaint`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ base64Image, base64Mask, prompt,
-        modelPath: config.localAiGgufPath }),
-      signal: AbortSignal.timeout(120_000),
+      body: JSON.stringify({ base64Image, base64Mask, prompt }),
+      signal: AbortSignal.timeout(900_000),
     });
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(`Local AI error: ${err.error}`);
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(`Local AI error: HTTP ${response.status}${detail ? ` ${detail}` : ''}`);
     }
-
-    const { base64Result } = await res.json();
-    return { base64Result, model: 'FLUX.1-Fill-dev-GGUF-Q4_K_M' };
+    const data = await response.json() as any;
+    return { base64Result: data.base64Result, model: this.modelId };
   }
 }
 
-// ===== Cloud Provider: fal.ai =====
-
-export class FalAiProvider implements AiProvider {
-  name = 'fal-ai-flux-fill';
-
-  async isAvailable(): Promise<boolean> {
-    return !!config.falAiKey;
-  }
-
-  async edit(base64Image: string, base64Mask: string, prompt: string): Promise<{ base64Result: string; model: string }> {
-    const response = await fetch(`${FAL_BASE}/${config.falAiModel}`, {
+class FalProvider implements AiProvider {
+  name = 'fal' as const;
+  constructor(public modelId: string) {}
+  async edit(base64Image: string, base64Mask: string, prompt: string) {
+    if (!config.falAiKey) throw new Error('FAL_AI_KEY chưa được cấu hình');
+    const response = await fetch(`https://fal.run/${this.modelId}`, {
       method: 'POST',
       headers: {
-        'Authorization': `Key ${config.falAiKey}`,
+        Authorization: `Key ${config.falAiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
         image_url: `data:image/png;base64,${base64Image}`,
         mask_url: `data:image/png;base64,${base64Mask}`,
-        prompt: prompt,
+        prompt,
       }),
+      signal: AbortSignal.timeout(180_000),
     });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`fal.ai error: ${response.status} ${errText}`);
-    }
-
+    if (!response.ok) throw new Error(`fal.ai error: ${response.status} ${await response.text()}`);
     const data = await response.json() as any;
-    const resultUrl = data.images?.[0]?.url || data.image?.url || data.url;
-
-    if (!resultUrl) {
-      throw new Error(`Unexpected fal.ai response: ${JSON.stringify(data)}`);
-    }
-
-    const imgResponse = await fetch(resultUrl);
-    if (!imgResponse.ok) {
-      throw new Error(`Failed to download result: ${imgResponse.status}`);
-    }
-    const buffer = await imgResponse.arrayBuffer();
-    const base64Result = Buffer.from(buffer).toString('base64');
-
-    return { base64Result, model: config.falAiModel };
+    const resultUrl = data.images?.[0]?.url ?? data.image?.url ?? data.url;
+    if (!resultUrl) throw new Error('fal.ai không trả về ảnh');
+    const imageResponse = await fetch(resultUrl);
+    if (!imageResponse.ok) throw new Error(`Không tải được kết quả fal.ai: HTTP ${imageResponse.status}`);
+    return {
+      base64Result: Buffer.from(await imageResponse.arrayBuffer()).toString('base64'),
+      model: this.modelId,
+    };
   }
 }
 
-// ===== Auto-select: local trước, fallback cloud =====
-
-export async function getProvider(): Promise<AiProvider> {
-  const local = new LocalAiProvider();
-  if (await local.isAvailable()) {
-    console.log('[AI] Using local provider: FLUX.1-Fill-dev GGUF');
-    return local;
-  }
-
-  const cloud = new FalAiProvider();
-  if (await cloud.isAvailable()) {
-    console.log('[AI] Using cloud provider: fal.ai flux-fill');
-    return cloud;
-  }
-
-  throw new Error('No AI provider available. Set FAL_AI_KEY or LOCAL_AI_ENABLED=true');
+export function getProviderFor(provider: 'local' | 'fal', modelId: string): AiProvider {
+  if (provider === 'fal') return new FalProvider(modelId);
+  const model = config.localModels.find((item) => item.id === modelId);
+  if (!model) throw new Error(`Local model not configured: ${modelId}`);
+  if (!model.enabled) throw new Error(`Local model disabled: ${modelId}`);
+  return new LocalProvider(model.id);
 }
 
-// Convenience wrapper
 export async function aiEdit(
+  providerName: 'local' | 'fal',
+  modelId: string,
   base64Image: string,
   base64Mask: string,
-  prompt: string
-): Promise<{ base64Result: string; model: string; provider: string }> {
-  const provider = await getProvider();
+  prompt: string,
+) {
+  const provider = getProviderFor(providerName, modelId);
   const result = await provider.edit(base64Image, base64Mask, prompt);
   return { ...result, provider: provider.name };
 }

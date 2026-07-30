@@ -1,149 +1,108 @@
-import React, { useState, useCallback } from 'react';
-import TabBar from './components/TabBar';
-import Toolbar from './components/Toolbar';
-import PromptBar from './components/PromptBar';
-import LayerPanel from './components/LayerPanel';
+import React, { useCallback, useRef, useState } from 'react';
+import CanvasEditor from './components/CanvasEditor';
 import ExportDialog from './components/ExportDialog';
+import ImageDropZone from './components/ImageDropZone';
+import LayerPanel from './components/LayerPanel';
+import PromptBar from './components/PromptBar';
+import Toolbar from './components/Toolbar';
+import { api } from './lib/api';
+import { useProjectStore } from './stores/project';
 import FlatView from './views/FlatView';
 import Viewer360 from './views/Viewer360';
-import { useProjectStore } from './stores/project';
-import { api } from './lib/api';
+
+function formatFileSize(bytes?: number) {
+  if (!bytes) return '';
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export default function App() {
+  const state = useProjectStore();
   const [activeTab, setActiveTab] = useState<'360' | 'flat'>('360');
   const [exportOpen, setExportOpen] = useState(false);
-  const [promptTranslated, setPromptTranslated] = useState('');
+  const [fileSize, setFileSize] = useState<number>();
+  const imageInput = useRef<HTMLInputElement>(null);
+  const projectInput = useRef<HTMLInputElement>(null);
+  const fileName = state.imagePath?.split('/').pop()?.split('\\').pop();
+  const committed = state.layers.some((layer) => layer.status === 'committed');
 
-  const imagePath = useProjectStore((s) => s.imagePath);
-  const isEditing = useProjectStore((s) => s.isEditing);
-  const hasPreview = useProjectStore((s) => !!s.previewImage);
-  const openImage = useProjectStore((s) => s.openImage);
-  const reset = useProjectStore((s) => s.reset);
-
-  const handleOpenImage = useCallback(async () => {
-    const path = prompt('Nhập đường dẫn ảnh panorama:');
-    if (!path) return;
-    try {
-      const meta = await api.image.open(path);
-      openImage(path, meta.width, meta.height);
-    } catch (err: any) {
-      alert(`Lỗi mở ảnh: ${err.message}`);
-    }
-  }, [openImage]);
-
-  const handleSaveProject = useCallback(async () => {
-    const { imagePath, layers, horizon } = useProjectStore.getState();
-    if (!imagePath) return;
-    const projectPath = imagePath.replace(/\.\w+$/, '.360project');
-    try {
-      await api.project.save(projectPath, { imagePath, layers, horizon });
-      alert(`Đã lưu project: ${projectPath}`);
-    } catch (err: any) {
-      alert(`Lỗi lưu project: ${err.message}`);
-    }
+  const openFile = useCallback(async (file: File) => {
+    const meta = await api.image.upload(file);
+    useProjectStore.getState().openImage(meta.path, meta.width, meta.height);
+    setFileSize(file.size);
   }, []);
 
-  const handleLoadProject = useCallback(async () => {
-    const path = prompt('Nhập đường dẫn file .360project:');
-    if (!path) return;
-    try {
-      const project = await api.project.load(path);
-      const meta = await api.image.open(project.imagePath);
-      openImage(project.imagePath, meta.width, meta.height);
-      useProjectStore.setState({ layers: project.layers, horizon: project.horizon });
-    } catch (err: any) {
-      alert(`Lỗi mở project: ${err.message}`);
-    }
-  }, [openImage]);
-
-  const handleApply = useCallback(() => {
-    // Will be fully wired in Task 13 with actual mask data
-    useProjectStore.getState().setPreview(null);
-    useProjectStore.getState().setIsEditing(false);
+  const saveProject = useCallback(async () => {
+    const current = useProjectStore.getState();
+    if (!current.imagePath) return;
+    const projectPath = current.imagePath.replace(/\.\w+$/, '.360project');
+    await api.project.save(projectPath, {
+      version: 2,
+      imagePath: current.imagePath,
+      layers: current.layers,
+      horizon: current.horizon,
+    });
+    alert(`Đã lưu project: ${projectPath}`);
   }, []);
 
+  const loadProject = useCallback(async (file: File) => {
+    const { project } = await api.project.upload(file);
+    const meta = await api.image.open(project.imagePath);
+    state.openImage(project.imagePath, meta.width, meta.height);
+    useProjectStore.setState({ layers: project.layers ?? [] });
+  }, [state.openImage]);
+
+  const canvasWorkflow = ['canvas-edit', 'generating', 'ai-review'].includes(state.workflow);
   return (
-    <div style={styles.root}>
-      {/* Top bar */}
-      <div style={styles.topBar}>
-        <h1 style={styles.logo}>360 Image Studio</h1>
-        <div style={styles.topActions}>
-          <button style={styles.topBtn} onClick={handleOpenImage}>📂 Mở ảnh</button>
-          <button style={styles.topBtn} onClick={handleLoadProject}>📋 Load Project</button>
-          <button style={styles.topBtn} onClick={handleSaveProject} disabled={!imagePath}>💾 Save Project</button>
-          <button style={styles.topBtn} onClick={() => setExportOpen(true)} disabled={!imagePath}>📤 Export</button>
-          <button style={styles.topBtn} onClick={reset} disabled={!imagePath}>🔄 Reset</button>
-        </div>
-      </div>
+    <div className="app-shell">
+      <input ref={imageInput} hidden type="file" accept="image/*" onChange={(event) => {
+        const file = event.target.files?.[0];
+        if (file) void openFile(file);
+        event.target.value = '';
+      }} />
+      <input ref={projectInput} hidden type="file" accept=".360project" onChange={(event) => {
+        const file = event.target.files?.[0];
+        if (file) void loadProject(file);
+        event.target.value = '';
+      }} />
 
-      {/* Tab bar */}
-      <TabBar activeTab={activeTab} onTabChange={setActiveTab} disabled={isEditing} />
+      <header className="top-bar">
+        <span className="top-bar-logo"><strong>360</strong><span>ImageStudio</span></span>
+        <nav className="top-bar-tabs">
+          <button className={`top-bar-tab ${activeTab === '360' ? 'active' : ''}`} disabled={state.workflow !== 'viewing'} onClick={() => setActiveTab('360')}>🌐 360 View</button>
+          <button className={`top-bar-tab ${activeTab === 'flat' ? 'active' : ''}`} disabled={state.workflow !== 'viewing'} onClick={() => setActiveTab('flat')}>📐 Flat View</button>
+        </nav>
+        <details className="file-menu">
+          <summary>☰ File</summary>
+          <div className="file-menu-popover">
+            <button onClick={() => imageInput.current?.click()}>📂 Open Image</button>
+            <button onClick={() => projectInput.current?.click()}>📋 Load Project</button>
+            <button disabled={!state.imagePath} onClick={() => void saveProject()}>💾 Save Project</button>
+            <button disabled={!state.imagePath || !committed} onClick={() => setExportOpen(true)}>📤 Export Final</button>
+            <button disabled={!state.imagePath} onClick={state.reset}>↻ New</button>
+          </div>
+        </details>
+        {fileName && <span className="top-bar-file"><strong>{fileName}</strong> · {state.imageWidth} × {state.imageHeight} {fileSize ? `· ${formatFileSize(fileSize)}` : ''}</span>}
+        <button className="export-final-btn" disabled={!state.imagePath || !committed} onClick={() => setExportOpen(true)}>Export Final</button>
+      </header>
 
-      {/* Toolbar */}
-      <Toolbar />
-
-      {/* Main area */}
-      <div style={styles.main}>
-        {/* Canvas / Viewer */}
-        <div style={styles.editorArea}>
-          {activeTab === '360' ? <Viewer360 /> : <FlatView />}
-
-          {/* Bottom prompt bar */}
-          <PromptBar
-            onPreview={(result, translated) => setPromptTranslated(translated)}
-            onApply={handleApply}
-            hasPreview={hasPreview}
-            disabled={!imagePath}
-          />
-        </div>
-
-        {/* Sidebar */}
+      <main className="workspace">
+        <Toolbar onExport={() => setExportOpen(true)} onSave={() => void saveProject()} />
+        <section className="editor-area">
+          {state.workflow === 'empty'
+            ? <ImageDropZone onOpenFile={openFile} />
+            : canvasWorkflow
+              ? <CanvasEditor />
+              : activeTab === '360' ? <Viewer360 /> : <FlatView />}
+        </section>
         <LayerPanel />
-      </div>
-
-      {/* Export modal */}
+      </main>
+      <PromptBar />
+      <footer className="status-bar">
+        <span>{fileName ? `${fileName} — ${state.layers.length} layer(s)` : 'Chưa mở ảnh'}</span>
+        <span>{state.workflow}</span>
+      </footer>
       <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} />
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  root: {
-    display: 'flex',
-    flexDirection: 'column',
-    height: '100vh',
-    background: '#0f0f23',
-    color: '#fff',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-  },
-  topBar: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '8px 16px',
-    background: '#1a1a2e',
-    borderBottom: '1px solid #333',
-  },
-  logo: { fontSize: 20, fontWeight: 700, margin: 0, color: '#4fc3f7' },
-  topActions: { display: 'flex', gap: 8 },
-  topBtn: {
-    padding: '6px 14px',
-    border: '1px solid #444',
-    borderRadius: 6,
-    background: '#16213e',
-    color: '#ccc',
-    cursor: 'pointer',
-    fontSize: 13,
-  },
-  main: {
-    flex: 1,
-    display: 'flex',
-    overflow: 'hidden',
-  },
-  editorArea: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden',
-  },
-};

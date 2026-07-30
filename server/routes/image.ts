@@ -1,11 +1,27 @@
 import { Router } from 'express';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import path from 'path';
 import fs from 'fs/promises';
+import multer from 'multer';
+import sharp from 'sharp';
 import { openImage, getTile, serveImage, exportImage, CACHE_DIR } from '../services/image-processor';
-import type { ImageOpenRequest, ImageOpenResponse, TileRequest, ExportRequest } from '../../shared/types';
+import { renderPerspective, calcPerspectiveResolution } from '../services/perspective-projector';
+import type { ImageOpenRequest, ImageOpenResponse, TileRequest, ExportRequest, PerspectiveRenderRequest } from '../../shared/types';
 
 export const imageRouter = Router();
+
+// Multer setup — save uploaded files to cache dir
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: CACHE_DIR,
+    filename: (_req, file, cb) => {
+      const timestamp = Date.now();
+      const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
+      cb(null, `upload-${timestamp}-${safeName}`);
+    },
+  }),
+  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB max for large panoramas
+});
 
 imageRouter.post('/open', async (req, res) => {
   try {
@@ -64,6 +80,71 @@ imageRouter.post('/cache-result', async (req, res) => {
   }
 });
 
+imageRouter.post('/perspective-render', async (req, res) => {
+  try {
+    const { imagePath, viewPose, viewport, rect, mode } = req.body as PerspectiveRenderRequest;
+    if (!imagePath?.trim()) return res.status(400).json({ error: 'imagePath is required' });
+    if (!viewPose || viewPose.fov === undefined) return res.status(400).json({ error: 'viewPose with fov is required' });
+    if (!viewport?.width || !viewport?.height) return res.status(400).json({ error: 'viewport is required' });
+
+    // Use full viewport rect for full-frame mode
+    const effectiveRect = mode === 'full-frame'
+      ? { x: 0, y: 0, width: viewport.width, height: viewport.height }
+      : (rect || { x: 0, y: 0, width: viewport.width, height: viewport.height });
+
+    const metadata = await sharp(imagePath).metadata();
+    const panoramaSize = {
+      width: metadata.width ?? 8192,
+      height: metadata.height ?? 4096,
+    };
+
+    const result = await renderPerspective(imagePath, viewPose, viewport, effectiveRect, panoramaSize);
+
+    // Cache the rendered perspective
+    const hash = createHash('sha256').update(result.buffer).digest('hex');
+    const cacheFile = path.join(CACHE_DIR, `${hash}.png`);
+    await fs.mkdir(path.dirname(cacheFile), { recursive: true });
+    await fs.writeFile(cacheFile, result.buffer);
+
+    res.json({
+      resultImageId: hash,
+      width: result.width,
+      height: result.height,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+imageRouter.get('/cache/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    // Sanitize: only allow hex characters (SHA256 hash format)
+    if (!/^[a-f0-9]{64}$/.test(id)) {
+      return res.status(400).json({ error: 'Invalid cache ID format' });
+    }
+    const cacheFile = path.join(CACHE_DIR, `${id}.png`);
+    const buffer = await fs.readFile(cacheFile);
+    res.type('image/png').send(buffer);
+  } catch (err: any) {
+    if (err.code === 'ENOENT') {
+      return res.status(404).json({ error: 'Cache file not found' });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Upload ảnh từ browser — lưu vào cache dir, trả về path + metadata
+imageRouter.post('/upload', upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No image file provided' });
+    const meta = await openImage(req.file.path);
+    res.json({ ...meta, path: req.file.path, originalName: req.file.originalname });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 imageRouter.post('/export', async (req, res) => {
   try {
     const body = req.body as ExportRequest;
@@ -77,5 +158,27 @@ imageRouter.post('/export', async (req, res) => {
     res.json({ success: true, outputPath: body.outputPath });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+imageRouter.post('/preview', async (req, res) => {
+  const { path: imagePath, layers } = req.body as Pick<ExportRequest, 'path' | 'layers'>;
+  if (!imagePath) return res.status(400).json({ error: 'path is required' });
+  const previewPath = path.join(CACHE_DIR, `preview-${randomUUID()}.png`);
+  try {
+    await exportImage(
+      imagePath,
+      previewPath,
+      'png',
+      95,
+      Array.isArray(layers) ? layers : [],
+      { yaw: 0, pitch: 0, roll: 0 },
+    );
+    const buffer = await fs.readFile(previewPath);
+    res.type('image/png').send(buffer);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  } finally {
+    await fs.unlink(previewPath).catch(() => undefined);
   }
 });

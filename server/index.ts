@@ -3,7 +3,6 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { spawn, ChildProcess } from 'child_process';
-import { createInterface } from 'readline';
 import { config } from './config';
 import { imageRouter } from './routes/image';
 import { aiRouter } from './routes/ai';
@@ -32,16 +31,6 @@ app.get('{*splat}', (_req, res) => {
 
 // ===== Local AI Startup =====
 
-function askLocalAi(): Promise<boolean> {
-  return new Promise((resolve) => {
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    rl.question('Found local AI model. Load it? (y/N): ', (answer) => {
-      rl.close();
-      resolve(answer.trim().toLowerCase() === 'y');
-    });
-  });
-}
-
 let localAiProcess: ChildProcess | null = null;
 
 async function startLocalAi() {
@@ -49,17 +38,15 @@ async function startLocalAi() {
     console.log('[AI] localAiEnabled=false, using cloud only');
     return;
   }
+  if (!config.localAiAutoStart) {
+    console.log('[AI] Local model configured; auto-start disabled');
+    return;
+  }
   try {
     const fs = await import('fs/promises');
     await fs.access(config.localAiGgufPath);
   } catch {
     console.log(`[AI] Model not found at ${config.localAiGgufPath}, using cloud only`);
-    return;
-  }
-
-  const shouldLoad = await askLocalAi();
-  if (!shouldLoad) {
-    console.log('[AI] Local AI skipped, using cloud only');
     return;
   }
 
@@ -75,8 +62,9 @@ async function startLocalAi() {
   const start = Date.now();
   while (Date.now() - start < 60_000) {
     try {
-      const res = await fetch(`http://127.0.0.1:${config.localAiPort}/health`);
-      if (res.ok) {
+      const res = await fetch(`${config.localAiBaseUrl}/health`);
+      const health = res.ok ? await res.json() as { status?: string } : null;
+      if (health?.status === 'ready') {
         console.log(`[AI] Local AI ready on port ${config.localAiPort}`);
         return;
       }

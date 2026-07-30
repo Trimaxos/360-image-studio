@@ -4,3 +4,6 @@ dist/
 *.360project
 .superpowers/
 .playwright-mcp/
+models/*.gguf
+models/flux-fill-base/
+artifacts/*.oci.tar

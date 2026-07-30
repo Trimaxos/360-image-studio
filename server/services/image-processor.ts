@@ -83,34 +83,44 @@ export async function exportImage(
   format: 'jpeg' | 'png' | 'webp' | 'avif',
   quality: number,
   layers: Layer[],
-  horizon: Horizon
+  _horizon: Horizon
 ): Promise<void> {
   await ensureCacheDir();
 
   // Start with original image
   let pipeline = sharp(imagePath);
-
-  // Apply horizon correction if needed
-  if (horizon.roll !== 0 || horizon.pitch !== 0 || horizon.yaw !== 0) {
-    // Simple roll rotation via affine transform
-    if (horizon.roll !== 0) {
-      pipeline = pipeline.rotate(horizon.roll, { background: { r: 0, g: 0, b: 0, alpha: 0 } });
-    }
-    // Pitch/yaw correction will be implemented in Phase 2 (Horizon Level)
-    void horizon.pitch;
-    void horizon.yaw;
-  }
+  const sourceMeta = await sharp(imagePath).metadata();
+  const panoramaSize = {
+    width: sourceMeta.width ?? 8192,
+    height: sourceMeta.height ?? 4096,
+  };
 
   // Composite layers in order (bottom to top)
-  const sortedLayers = [...layers].sort((a, b) => a.order - b.order);
+  const sortedLayers = exportableLayers(layers);
 
   if (sortedLayers.length > 0) {
     for (const layer of sortedLayers) {
-      if (!layer.visible) continue;
-
       const cacheFile = path.join(CACHE_DIR, `${layer.resultImageId}.png`);
       try {
         await fs.access(cacheFile);
+
+        if (layer.type === 'perspective') {
+          const { projectPerspectiveLayer } = await import('./perspective-projector');
+          const projected = await projectPerspectiveLayer(cacheFile, layer, panoramaSize);
+          pipeline = pipeline.composite([{ input: projected, top: 0, left: 0, blend: 'over' }]);
+          continue;
+        }
+
+        if (layer.selection?.maskBase64) {
+          const maskedResult = await applyBase64Mask(cacheFile, layer.selection.maskBase64);
+          pipeline = pipeline.composite([{
+            input: maskedResult,
+            top: Math.round(layer.tileCoords.y),
+            left: Math.round(layer.tileCoords.x),
+            blend: 'over',
+          }]);
+          continue;
+        }
 
         // Nếu có maskData, tạo mask từ maskData để blend mượt
         // thay vì overlay toàn bộ tile hình chữ nhật
@@ -160,4 +170,30 @@ export async function exportImage(
   };
 
   await pipeline.toFormat(format as any, formatOptions[format]).toFile(outputPath);
+}
+
+export function exportableLayers(layers: Layer[]): Layer[] {
+  return layers
+    .filter((layer) => layer.visible !== false && layer.status === 'committed')
+    .sort((a, b) => a.order - b.order);
+}
+
+export async function applyBase64Mask(resultPath: string, base64Mask: string): Promise<Buffer> {
+  const metadata = await sharp(resultPath).metadata();
+  const width = metadata.width ?? 1;
+  const height = metadata.height ?? 1;
+  const alpha = await sharp(Buffer.from(base64Mask, 'base64'))
+    .resize(width, height, { fit: 'fill' })
+    .greyscale()
+    .raw()
+    .toBuffer();
+  const rgb = await sharp(resultPath).removeAlpha().raw().toBuffer();
+  const rgba = Buffer.alloc(width * height * 4);
+  for (let pixel = 0; pixel < width * height; pixel += 1) {
+    rgba[pixel * 4] = rgb[pixel * 3];
+    rgba[pixel * 4 + 1] = rgb[pixel * 3 + 1];
+    rgba[pixel * 4 + 2] = rgb[pixel * 3 + 2];
+    rgba[pixel * 4 + 3] = alpha[pixel];
+  }
+  return sharp(rgba, { raw: { width, height, channels: 4 } }).png().toBuffer();
 }

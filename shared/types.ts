@@ -44,6 +44,13 @@ export interface Horizon {
   yaw: number;    // -180 to 180
 }
 
+export interface ViewPose {
+  yaw: number;
+  pitch: number;
+  roll: number;
+  fov: number;
+}
+
 // ===== Layer =====
 
 export interface Layer {
@@ -73,6 +80,58 @@ export interface Layer {
 
   prompt: string;
   resultImageId: string;  // filename in cache dir (SHA256 hash of result image)
+  status?: 'draft' | 'committed';
+  name?: string;
+  selection?: SelectionDraft;
+}
+
+export interface SelectionDraft {
+  sourceView: '360' | 'flat';
+  mode: 'full-frame' | 'free-select';
+  rect: { x: number; y: number; width: number; height: number };
+  viewport: { width: number; height: number };
+  tileCoords: { x: number; y: number; w: number; h: number };
+  viewPose: ViewPose;
+  prompt: string;
+  maskBase64?: string;
+}
+
+export interface PerspectiveRenderRequest {
+  imagePath: string;
+  viewPose: ViewPose;
+  viewport: { width: number; height: number };
+  rect: { x: number; y: number; width: number; height: number };
+  mode: 'full-frame' | 'free-select';
+}
+
+export interface PerspectiveRenderResponse {
+  resultImageId: string;
+  width: number;
+  height: number;
+}
+
+export interface GeneratedVariant {
+  id: string;
+  base64Result: string;
+  modelId: string;
+}
+
+export interface AiModelOption {
+  id: string;
+  displayName: string;
+  provider: 'local' | 'fal';
+  capabilities: Array<'inpainting' | 'image-edit'>;
+  enabled: boolean;
+  disabledReason?: string;
+}
+
+export interface ModelCatalogResponse {
+  groups: Array<{
+    provider: 'local' | 'fal';
+    label: string;
+    models: AiModelOption[];
+  }>;
+  errors?: Partial<Record<'local' | 'fal', string>>;
 }
 
 export interface MaskShape {
@@ -86,6 +145,8 @@ export interface MaskShape {
 // ===== AI =====
 
 export interface AiEditRequest {
+  provider: 'local' | 'fal';
+  modelId: string;
   base64Image: string;
   base64Mask: string;
   prompt: string;  // always in English by this point

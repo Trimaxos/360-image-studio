@@ -2,52 +2,38 @@ import React from 'react';
 import { useProjectStore } from '../stores/project';
 
 export default function LayerPanel() {
-  const layers = useProjectStore((s) => s.layers);
-  const removeLayer = useProjectStore((s) => s.removeLayer);
-  const reorderLayer = useProjectStore((s) => s.reorderLayer);
-  const toggleLayerVisibility = useProjectStore((s) => s.toggleLayerVisibility);
-
-  if (!layers.length) {
-    return (
-      <div className="layer-panel">
-        <div className="panel-header">
-          Layers <span className="layer-count">0</span>
-        </div>
-        <p className="layer-empty">Chưa có chỉnh sửa nào</p>
-      </div>
-    );
-  }
-
-  const sorted = [...layers].sort((a, b) => b.order - a.order);
-
+  const state = useProjectStore();
+  const sorted = [...state.layers].sort((a, b) => b.order - a.order);
   return (
-    <div className="layer-panel">
+    <aside className="layer-panel">
       <div className="panel-header">
-        Layers <span className="layer-count">{layers.length}</span>
+        Layers <span className="layer-count">{state.layers.length} layer(s)</span>
       </div>
-      <div className="layer-list">
-        {sorted.map((layer) => (
-          <div key={layer.id} className="layer-item">
-            <div className="layer-thumb">{layer.type === 'flat' ? '🗺️' : '🔄'}</div>
-            <div className="layer-info">
-              <div className="layer-name">Edit #{layer.order} — "{layer.prompt.slice(0, 30)}"</div>
-              <div className="layer-meta">{layer.type === 'perspective' ? '360° View' : 'Flat View'} • tile {layer.tileCoords.w}×{layer.tileCoords.h}</div>
+      {!sorted.length ? <p className="layer-empty">Chưa có chỉnh sửa nào</p> : (
+        <div className="layer-list">
+          {sorted.map((layer) => (
+            <div
+              key={layer.id}
+              className={`layer-item ${state.activeLayerId === layer.id ? 'active' : ''} ${layer.visible === false ? 'hidden-layer' : ''}`}
+              onClick={() => useProjectStore.setState({ activeLayerId: layer.id })}
+            >
+              <div className="layer-thumb">{layer.type === 'perspective' ? '360°' : '2D'}</div>
+              <div className="layer-info">
+                <div className="layer-name">{layer.name ?? `Layer ${layer.order}`}</div>
+                <div className="layer-meta">{layer.status ?? 'draft'} · {layer.tileCoords.w}×{layer.tileCoords.h}</div>
+              </div>
+              <div className="layer-actions">
+                <button className={layer.visible === false ? 'hidden' : 'visible'} onClick={(event) => { event.stopPropagation(); state.toggleLayerVisibility(layer.id); }} title="Ẩn/hiện">👁</button>
+                <button onClick={(event) => { event.stopPropagation(); state.openLayerEditor(layer.id); }} title="Edit">✎</button>
+                <button onClick={(event) => {
+                  event.stopPropagation();
+                  if (confirm(`Xóa Layer ${layer.order}?`)) state.removeLayer(layer.id);
+                }} title="Xóa">🗑</button>
+              </div>
             </div>
-            <div className="layer-actions">
-              <button
-                className={`layer-eye ${layer.visible !== false ? 'visible' : 'hidden'}`}
-                onClick={() => toggleLayerVisibility(layer.id)}
-                title={layer.visible !== false ? 'Ẩn layer' : 'Hiện layer'}
-              >
-                👁️
-              </button>
-              <button className="layer-delete" onClick={() => removeLayer(layer.id)} title="Xóa layer">
-                🗑️
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
+          ))}
+        </div>
+      )}
+    </aside>
   );
 }

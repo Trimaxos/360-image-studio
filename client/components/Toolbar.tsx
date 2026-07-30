@@ -1,58 +1,77 @@
 import React from 'react';
+import { permissionsFor } from '../stores/workflow';
 import { useProjectStore } from '../stores/project';
 
-const tools = [
-  { id: 'brush' as const, label: '🖌️ Brush', shortcut: 'B' },
-  { id: 'rect' as const, label: '⬜ Rect', shortcut: 'R' },
-  { id: 'lasso' as const, label: '✏️ Lasso', shortcut: 'L' },
-  { id: 'horizon' as const, label: '📐 Horizon', shortcut: 'H' },
-];
-
-export default function Toolbar() {
-  const activeTool = useProjectStore((s) => s.activeTool);
-  const setActiveTool = useProjectStore((s) => s.setActiveTool);
-  const isEditing = useProjectStore((s) => s.isEditing);
-
-  return (
-    <div style={styles.bar}>
-      {tools.map((t) => (
-        <button
-          key={t.id}
-          style={{
-            ...styles.tool,
-            ...(activeTool === t.id ? styles.activeTool : {}),
-          }}
-          onClick={() => setActiveTool(activeTool === t.id ? null : t.id)}
-          disabled={isEditing && t.id !== 'horizon'}
-          title={`${t.label} (${t.shortcut})`}
-        >
-          {t.label}
-        </button>
-      ))}
-    </div>
-  );
+interface Props {
+  onExport: () => void;
+  onSave: () => void;
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  bar: {
-    display: 'flex',
-    gap: 4,
-    padding: '8px 12px',
-    background: '#16213e',
-    borderBottom: '1px solid #333',
-  },
-  tool: {
-    padding: '8px 16px',
-    border: '1px solid #444',
-    borderRadius: 6,
-    background: '#1a1a2e',
-    color: '#ccc',
-    cursor: 'pointer',
-    fontSize: 14,
-  },
-  activeTool: {
-    background: '#0d7377',
-    borderColor: '#4fc3f7',
-    color: '#fff',
-  },
-};
+export default function Toolbar({ onExport, onSave }: Props) {
+  const state = useProjectStore();
+  const permission = permissionsFor(state.workflow);
+  const committed = state.layers.some((layer) => layer.status === 'committed');
+  const controls = [
+    { key: 'yaw' as const, label: 'Yaw', min: -180, max: 180 },
+    { key: 'pitch' as const, label: 'Pitch', min: -90, max: 90 },
+    { key: 'roll' as const, label: 'Roll', min: -180, max: 180 },
+    { key: 'fov' as const, label: 'FOV', min: 10, max: 120 },
+  ];
+  const tools = [
+    { id: 'rect' as const, icon: '▭', label: 'Rectangle Select', enabled: permission.rect },
+    { id: 'brush' as const, icon: '🖊', label: 'Brush Mask', enabled: permission.brush },
+    { id: 'lasso' as const, icon: '⌁', label: 'Lasso', enabled: permission.lasso },
+  ];
+
+  return (
+    <aside className="sidebar-left">
+      <section className="sidebar-section">
+        <div className="sidebar-section-title">Tools</div>
+        {tools.map((tool) => (
+          <button
+            key={tool.id}
+            className={`sidebar-btn ${state.activeTool === tool.id ? 'active' : ''}`}
+            disabled={!tool.enabled}
+            onClick={() => state.setActiveTool(tool.id)}
+          >
+            <span className="sidebar-btn-icon">{tool.icon}</span>
+            <span>{tool.label}</span>
+          </button>
+        ))}
+        <button className="sidebar-btn" disabled={!permission.undo} onClick={() => window.dispatchEvent(new Event('canvas-undo'))}>
+          <span className="sidebar-btn-icon">↩</span><span>Undo</span>
+        </button>
+      </section>
+
+      <section className="sidebar-section">
+        <div className="sidebar-section-title">View Controls</div>
+        {controls.map((control) => (
+          <label className="sidebar-view-row" key={control.key}>
+            <span>{control.label}</span>
+            <strong>{state.viewPose[control.key].toFixed(1)}°</strong>
+            <input
+              aria-label={control.label}
+              type="range"
+              min={control.min}
+              max={control.max}
+              step={0.1}
+              value={state.viewPose[control.key]}
+              disabled={!permission.viewControls}
+              onChange={(event) => state.updateViewPose({ [control.key]: Number(event.target.value) })}
+            />
+          </label>
+        ))}
+      </section>
+
+      <section className="sidebar-section project-section">
+        <div className="sidebar-section-title">Project</div>
+        <button className="sidebar-btn" disabled={!state.imagePath} onClick={onSave}>
+          <span className="sidebar-btn-icon">💾</span><span>Save Project</span>
+        </button>
+        <button className="sidebar-btn" disabled={!state.imagePath || !committed} onClick={onExport}>
+          <span className="sidebar-btn-icon">📤</span><span>Export Final</span>
+        </button>
+      </section>
+    </aside>
+  );
+}

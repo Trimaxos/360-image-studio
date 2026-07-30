@@ -1,158 +1,139 @@
-import React, { useState, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
+import type { Layer } from '../../shared/types';
 import { api } from '../lib/api';
 import { blobToBase64 } from '../lib/mask-utils';
+import { permissionsFor } from '../stores/workflow';
 import { useProjectStore } from '../stores/project';
-import type { Layer } from '../../shared/types';
+import ModelSelector from './ModelSelector';
 
-interface Props {
-  onPreview: (base64Result: string, translatedPrompt: string) => void;
-  onApply: () => void;
-  hasPreview: boolean;
-  disabled: boolean;
-}
-
-export default function PromptBar({ onPreview, onApply, hasPreview, disabled }: Props) {
+export default function PromptBar() {
+  const state = useProjectStore();
+  const permission = permissionsFor(state.workflow);
   const [prompt, setPrompt] = useState('');
-  const [flowState, setFlowState] = useState<'idle' | 'loading' | 'done'>('idle');
-  const [aiResult, setAiResult] = useState<string | null>(null);
-  const [promptTranslated, setPromptTranslated] = useState('');
   const [error, setError] = useState('');
+  const generating = state.workflow === 'generating';
+  const selectedVariant = state.generatedVariants.find((item) => item.id === state.selectedVariantId);
 
-  const handleGenerate = async () => {
-    if (!prompt.trim()) return;
-    setFlowState('loading');
+  useEffect(() => {
+    setPrompt(state.selectionDraft?.prompt ?? '');
+  }, [state.activeLayerId]);
+
+  const generate = async () => {
+    const selection = state.selectionDraft;
+    const model = state.selectedModel;
+    const mask = state.getMaskBase64?.();
+    if (!selection || !state.imagePath || !model || !mask || !prompt.trim()) return;
     setError('');
+    state.setWorkflow('generating');
     try {
-      // 1. Translate VN→EN
-      const { translated } = await api.ai.translate(prompt.trim());
-      setPromptTranslated(translated);
+      const translated = (await api.ai.translate(prompt.trim())).translated;
+      let base64Image: string | undefined;
 
-      // 2. Get rect + mask from store
-      const { rectSelect, imagePath, getMaskBase64 } = useProjectStore.getState();
-      if (!rectSelect || !imagePath) throw new Error('Vẽ Rect Select trước');
+      // Try loading from active layer's cache first (perspective layers)
+      const activeLayer = state.layers.find((l) => l.id === state.activeLayerId);
+      if (activeLayer?.resultImageId) {
+        const cacheUrl = api.image.cacheUrl(activeLayer.resultImageId);
+        const response = await fetch(cacheUrl);
+        if (!response.ok) throw new Error('Không đọc được ảnh canvas từ cache.');
+        base64Image = await blobToBase64(await response.blob());
+      } else {
+        // Fallback: load tile from original image (flat view or draft layer)
+        const coords = selection.tileCoords;
+        const imageResponse = await fetch(api.image.tileUrl(
+          state.imagePath, coords.x, coords.y, coords.w, coords.h,
+        ));
+        if (!imageResponse.ok) throw new Error('Không đọc được vùng ảnh.');
+        base64Image = await blobToBase64(await imageResponse.blob());
+      }
 
-      // 3. Crop tile at exact rect coordinates
-      const tileUrl = `/api/image/tile?path=${encodeURIComponent(imagePath)}&x=${rectSelect.x}&y=${rectSelect.y}&w=${rectSelect.nativeW}&h=${rectSelect.nativeH}`;
-      const tileResp = await fetch(tileUrl);
-      const tileBlob = await tileResp.blob();
-      const base64Image = await blobToBase64(tileBlob);
-
-      // 4. Get mask as base64 from Fabric canvas (via store callback, set by FlatView/Viewer360)
-      const base64Mask = getMaskBase64?.();
-      if (!base64Mask) throw new Error('Vẽ mask trước khi generate');
-
-      // 5. Call AI
-      const result = await api.ai.edit({ base64Image, base64Mask, prompt: translated });
-
-      // 6. Show preview
-      setAiResult(result.base64Result);
-      onPreview(result.base64Result, translated);
-      setFlowState('done');
-    } catch (err: any) {
-      setError(err.message);
-      setFlowState('idle');
+      const result = await api.ai.edit({
+        provider: model.provider,
+        modelId: model.id,
+        base64Image,
+        base64Mask: mask,
+        prompt: translated,
+      });
+      state.setSelectionDraft({ ...selection, prompt });
+      state.addGeneratedVariant({
+        id: crypto.randomUUID(),
+        base64Result: result.base64Result,
+        modelId: result.model,
+      });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Generate thất bại');
+      state.setWorkflow(state.generatedVariants.length ? 'ai-review' : 'canvas-edit');
     }
   };
 
-  const handleApply = useCallback(async () => {
-    const state = useProjectStore.getState();
-    if (!aiResult || !state.rectSelect) return;
-
-    // Lưu AI result vào disk cache, lấy SHA256 hash làm resultImageId
-    const { resultImageId } = await api.image.saveResultCache(aiResult);
-
-    const layer: Layer = {
-      id: crypto.randomUUID(),
-      order: state.layers.length + 1,
-      type: state.viewLock ? 'perspective' : 'flat',
-      visible: true,
-      yaw: state.viewLock?.yaw ?? 0,
-      pitch: state.viewLock?.pitch ?? 0,
-      roll: state.viewLock?.roll ?? 0,
-      fov: state.viewLock?.fov ?? 90,
-      tileCoords: {
-        x: state.rectSelect.x,
-        y: state.rectSelect.y,
-        w: state.rectSelect.nativeW,
-        h: state.rectSelect.nativeH,
-      },
-      maskData: [],
-      prompt: promptTranslated,
-      resultImageId,
-    };
-
-    state.addLayer(layer);
-    setFlowState('idle');
-    setAiResult(null);
-    onApply();
-  }, [aiResult, promptTranslated, onApply]);
+  const applySelected = async () => {
+    const selection = state.selectionDraft;
+    if (!selectedVariant || !selection) return;
+    setError('');
+    try {
+      const { resultImageId } = await api.image.saveResultCache(selectedVariant.base64Result);
+      const existing = state.activeLayerId ? state.layers.find((layer) => layer.id === state.activeLayerId) : null;
+      const layer: Layer = {
+        id: existing?.id ?? crypto.randomUUID(),
+        order: existing?.order ?? state.layers.length + 1,
+        type: selection.sourceView === '360' ? 'perspective' : 'flat',
+        visible: existing?.visible ?? true,
+        ...selection.viewPose,
+        tileCoords: selection.tileCoords,
+        maskData: existing?.maskData ?? [],
+        prompt,
+        resultImageId,
+        status: 'committed',
+        selection: { ...selection, prompt },
+      };
+      if (existing) state.updateLayer(existing.id, layer);
+      else state.addLayer(layer);
+      useProjectStore.setState({
+        activeLayerId: layer.id,
+        workflow: 'canvas-edit',
+        dirty: false,
+        generatedVariants: [],
+        selectedVariantId: null,
+      });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Apply thất bại');
+    }
+  };
 
   return (
-    <div style={styles.bar}>
+    <div className="prompt-bar">
+      <ModelSelector disabled={!permission.ai || generating} />
       <input
-        style={styles.input}
-        type="text"
         value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        placeholder="Mô tả thay đổi (VD: xóa xe máy)..."
-        disabled={disabled || flowState === 'loading'}
-        onKeyDown={(e) => e.key === 'Enter' && handleGenerate()}
+        onChange={(event) => {
+          const value = event.target.value;
+          setPrompt(value);
+          if (state.selectionDraft) {
+            state.setSelectionDraft({ ...state.selectionDraft, prompt: value });
+          } else {
+            state.markDirty();
+          }
+        }}
+        placeholder="Nhập prompt..."
+        disabled={!permission.ai || generating}
+        onKeyDown={(event) => { if (event.key === 'Enter') void generate(); }}
       />
       <button
-        style={{ ...styles.btn, ...styles.generateBtn }}
-        onClick={handleGenerate}
-        disabled={disabled || flowState === 'loading' || !prompt.trim()}
+        className="prompt-btn prompt-btn-generate"
+        disabled={!permission.ai || generating || !prompt.trim() || !state.selectedModel}
+        onClick={() => void generate()}
       >
-        {flowState === 'loading' ? '⏳ Generating...' : '⚡ Generate'}
+        {generating ? 'Generating…' : 'Generate'}
       </button>
-      <button
-        style={{ ...styles.btn, ...styles.previewBtn }}
-        disabled={flowState !== 'done'}
-      >
-        👁 Preview
-      </button>
-      <button
-        style={{ ...styles.btn, ...styles.applyBtn }}
-        onClick={handleApply}
-        disabled={flowState !== 'done'}
-      >
-        ✅ Apply
-      </button>
-      {error && <span style={styles.error}>{error}</span>}
+      {permission.ai && (
+        <button
+          className="prompt-btn prompt-btn-apply"
+          disabled={!selectedVariant}
+          onClick={() => void applySelected()}
+        >
+          Apply Selected
+        </button>
+      )}
+      {error && <span className="prompt-error" title={error}>⚠ {error}</span>}
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  bar: {
-    display: 'flex',
-    gap: 8,
-    padding: '8px 12px',
-    background: '#16213e',
-    borderTop: '1px solid #333',
-    alignItems: 'center',
-  },
-  input: {
-    flex: 1,
-    padding: '10px 14px',
-    borderRadius: 6,
-    border: '1px solid #444',
-    background: '#1a1a2e',
-    color: '#fff',
-    fontSize: 14,
-    outline: 'none',
-  },
-  btn: {
-    padding: '10px 20px',
-    borderRadius: 6,
-    border: 'none',
-    cursor: 'pointer',
-    fontSize: 14,
-    fontWeight: 600,
-    whiteSpace: 'nowrap' as const,
-  },
-  generateBtn: { background: '#e94560', color: '#fff' },
-  previewBtn: { background: '#0d7377', color: '#fff' },
-  applyBtn: { background: '#2e7d32', color: '#fff' },
-  error: { color: '#ef5350', fontSize: 13, marginLeft: 8 },
-};
