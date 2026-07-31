@@ -75,6 +75,7 @@ export default function RectSelectionOverlay({
           viewport: { width: box.width, height: box.height },
           rect: selected,
           mode,
+          scaleFactor: 1.5,
         });
         state.createPerspectiveLayer(selection, result.resultImageId, result.width, result.height);
       }

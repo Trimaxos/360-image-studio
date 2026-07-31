@@ -1,21 +1,30 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { SphereGeometry, Mesh, MeshBasicMaterial, TextureLoader } from 'three';
 import { api } from '../lib/api';
 import { useProjectStore } from '../stores/project';
 import { degreesToRadians, radiansToDegrees } from '../components/view-controls';
 import RectSelectionOverlay from '../components/RectSelectionOverlay';
-import { useCompositePreview } from '../hooks/useCompositePreview';
+
+const SPHERE_RADIUS = 10;
+
+function disposeMesh(mesh: Mesh) {
+  mesh.geometry?.dispose();
+  (mesh.material as MeshBasicMaterial)?.map?.dispose();
+  (mesh.material as MeshBasicMaterial)?.dispose();
+}
 
 export default function Viewer360() {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<any>(null);
   const applyingPoseRef = useRef(false);
+  const overlayMeshesRef = useRef<Map<string, Mesh>>(new Map());
   const [ready, setReady] = useState(false);
   const imagePath = useProjectStore((state) => state.imagePath);
   const workflow = useProjectStore((state) => state.workflow);
   const viewPose = useProjectStore((state) => state.viewPose);
+  const layers = useProjectStore((state) => state.layers);
   const updateViewPose = useProjectStore((state) => state.updateViewPose);
   const enterRectSelect = useProjectStore((state) => state.enterRectSelect);
-  const compositePreview = useCompositePreview();
 
   useEffect(() => {
     if (!containerRef.current || !imagePath) return;
@@ -71,10 +80,83 @@ export default function Viewer360() {
     viewerRef.current.setOption('mousewheel', unlocked);
   }, [workflow]);
 
+  // Sync overlay spheres with perspective layers
   useEffect(() => {
-    if (!viewerRef.current || !compositePreview || workflow !== 'viewing') return;
-    viewerRef.current.setPanorama(compositePreview, { transition: false, showLoader: false });
-  }, [compositePreview, workflow]);
+    const viewer = viewerRef.current;
+    if (!viewer || !ready) return;
+
+    // Base sphere that holds the panorama — overlay must be child to inherit rotation
+    const parent: Mesh | undefined = viewer.renderer.mesh;
+    if (!parent) return;
+
+    const currentIds = new Set(layers.map(l => l.id));
+
+    // Remove meshes for deleted layers
+    for (const [id, mesh] of overlayMeshesRef.current) {
+      if (!currentIds.has(id)) {
+        parent.remove(mesh);
+        disposeMesh(mesh);
+        overlayMeshesRef.current.delete(id);
+        viewer.needsUpdate();
+      }
+    }
+
+    // Add/update meshes for current perspective layers
+    for (const layer of layers) {
+      if (layer.type !== 'perspective' || !layer.equirectImageId) continue;
+
+      const textureUrl = api.image.cacheUrl(layer.equirectImageId);
+      let mesh = overlayMeshesRef.current.get(layer.id);
+
+      // Recreate mesh when texture URL changes (e.g. mask toggle triggers re-reproject)
+      const stale = !mesh || mesh.userData.textureUrl !== textureUrl;
+      if (stale) {
+        if (mesh) {
+          parent.remove(mesh);
+          disposeMesh(mesh);
+        }
+        // Match PSV's non-shader phiStart = -Math.PI/2 to align UV-to-spatial mapping
+        const geometry = new SphereGeometry(SPHERE_RADIUS, 64, 32, -Math.PI / 2)
+          .scale(-1, 1, 1);
+        const texture = new TextureLoader().load(
+          textureUrl,
+          () => viewer.needsUpdate(),
+        );
+        const material = new MeshBasicMaterial({
+          map: texture,
+          transparent: true,
+          depthTest: false,
+          depthWrite: false,
+        });
+        mesh = new Mesh(geometry, material);
+        mesh.userData.textureUrl = textureUrl;
+        parent.add(mesh);
+        overlayMeshesRef.current.set(layer.id, mesh);
+        viewer.needsUpdate();
+      }
+
+      // mesh is guaranteed to exist here: stale=true creates it, stale=false means we had it
+      const resolved = overlayMeshesRef.current.get(layer.id);
+      if (!resolved) continue;
+
+      const prevVisible = resolved.visible;
+      resolved.visible = layer.visible !== false;
+      if (resolved.visible !== prevVisible) {
+        viewer.needsUpdate();
+      }
+    }
+  }, [layers, ready]);
+
+  // Cleanup overlay meshes on unmount or panorama change
+  useEffect(() => {
+    return () => {
+      for (const mesh of overlayMeshesRef.current.values()) {
+        mesh.removeFromParent();
+        disposeMesh(mesh);
+      }
+      overlayMeshesRef.current.clear();
+    };
+  }, [imagePath]);
 
   const editHere = useCallback(() => enterRectSelect('360'), [enterRectSelect]);
 

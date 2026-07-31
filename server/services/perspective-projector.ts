@@ -1,5 +1,6 @@
 import sharp from 'sharp';
 import type { Layer, ViewPose } from '../../shared/types';
+import { createMaskFromShapes } from './mask-generator';
 
 interface Size { width: number; height: number }
 interface Point { x: number; y: number }
@@ -12,12 +13,13 @@ export function calcPerspectiveResolution(
   pose: ViewPose,
   rect: { x: number; y: number; width: number; height: number },
   panorama: Size,
+  scaleFactor: number = 1,
 ): Size {
   // Vertical resolution: rect covers rect.height/viewport.height of the vertical FOV.
   // Each degree of latitude = panorama.height / 180 equirectangular pixels.
-  // outHeight = rect's share of vertical FOV × pixels per degree.
+  // outHeight = rect's share of vertical FOV × pixels per degree × scaleFactor.
   const outHeight = Math.max(1, Math.round(
-    (rect.height / viewport.height) * (pose.fov * panorama.height / 180),
+    (rect.height / viewport.height) * (pose.fov * panorama.height / 180) * scaleFactor,
   ));
 
   // Width derived from rect's own aspect ratio — not viewport's.
@@ -34,8 +36,9 @@ export async function renderPerspective(
   viewport: Size,
   rect: { x: number; y: number; width: number; height: number },
   panorama: Size,
+  scaleFactor: number = 1,
 ): Promise<{ buffer: Buffer; width: number; height: number }> {
-  const outSize = calcPerspectiveResolution(viewport, viewPose, rect, panorama);
+  const outSize = calcPerspectiveResolution(viewport, viewPose, rect, panorama, scaleFactor);
 
   // Read source panorama as raw RGBA
   const source = await sharp(imagePath).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
@@ -171,10 +174,59 @@ export function projectScreenPoint(
   };
 }
 
+// ---- Lanczos2 (a=2) kernel for high-quality resampling ----
+
+/** Lanczos kernel weight for a=2. Zero outside [-2, 2). */
+export function lanczos2Weight(x: number): number {
+  if (x === 0) return 1;
+  const ax = Math.abs(x);
+  if (ax >= 2) return 0;
+  const pix = Math.PI * x;
+  const s = Math.sin(pix) / pix;              // sinc(x)
+  return s * Math.sin(pix / 2) / (pix / 2);  // sinc(x) · sinc(x/2)
+}
+
+/** Sample source image at subpixel (x,y) using Lanczos2 (4×4 = 16 samples).
+ *  x wraps horizontally (equirectangular), y clamps vertically. */
+function sampleLanczos2(
+  src: Buffer, w: number, h: number,
+  x: number, y: number,
+): [number, number, number, number] {
+  let r = 0, g = 0, b = 0, a = 0, totalWeight = 0;
+  const ix = Math.floor(x);
+  const iy = Math.floor(y);
+  // Lanczos2 kernel radius = 2 → sample sy ∈ [-1, 0, 1, 2]
+  for (let sy = -1; sy <= 2; sy++) {
+    const py = iy + sy;
+    if (py < 0 || py >= h) continue;
+    const wy = lanczos2Weight(y - (py + 0.5));
+    if (wy === 0) continue;
+    for (let sx = -1; sx <= 2; sx++) {
+      const px = ((ix + sx) % w + w) % w;  // horizontal wrap
+      const wx = lanczos2Weight(x - (px + 0.5));
+      const weight = wy * wx;
+      if (weight === 0) continue;
+      const i = (py * w + px) * 4;
+      r += src[i] * weight;
+      g += src[i + 1] * weight;
+      b += src[i + 2] * weight;
+      a += src[i + 3] * weight;
+      totalWeight += weight;
+    }
+  }
+  const norm = totalWeight || 1;
+  return [
+    Math.round(Math.max(0, Math.min(255, r / norm))),
+    Math.round(Math.max(0, Math.min(255, g / norm))),
+    Math.round(Math.max(0, Math.min(255, b / norm))),
+    Math.round(Math.max(0, Math.min(255, a / norm))),
+  ];
+}
+
 /**
  * Inverse mapping: reproject perspective result back to equirectangular.
- * Iterates over equirectangular bounding box → inverse rotate → NDC → bilinear sample from source.
- * No holes, proper antialiasing, ~10× faster than forward mapping.
+ * Iterates over equirectangular bounding box → inverse rotate → NDC → Lanczos2 sample from source.
+ * No holes, high-quality resampling, ~10× faster than forward mapping.
  */
 export async function reprojectToEquirectangular(
   resultPath: string,
@@ -189,21 +241,21 @@ export async function reprojectToEquirectangular(
   const rw = info.width;
   const rh = info.height;
 
-  // Pre-mask the source: if maskBase64 provided, bake it into alpha
+  // Pre-mask the source: only bake mask into alpha when per-layer "apply mask" toggle is on
+  // and there are active (non-disabled) mask shapes. Fixes Bug 2: undo lasso → all-black
+  // mask used to make entire layer transparent.
   let sourceData: Buffer;
-  if (selection.maskBase64) {
-    const mask = await sharp(Buffer.from(selection.maskBase64, 'base64'))
-      .resize(rw, rh, { fit: 'fill' })
-      .greyscale()
-      .raw()
-      .toBuffer();
+  const activeShapes = (layer.maskData ?? []).filter((s) => s.enabled !== false);
+  if (layer.maskEnabled && activeShapes.length > 0) {
+    const maskBuf = await createMaskFromShapes(activeShapes, rw, rh);
+    const { data: maskRaw } = await sharp(maskBuf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
     const masked = Buffer.alloc(rw * rh * 4);
     for (let i = 0; i < rw * rh; i++) {
       const si = i * 4;
       masked[si] = rawData[si];
       masked[si + 1] = rawData[si + 1];
       masked[si + 2] = rawData[si + 2];
-      masked[si + 3] = mask[i];
+      masked[si + 3] = maskRaw[si + 3]; // only alpha from mask
     }
     sourceData = masked;
   } else {
@@ -346,25 +398,14 @@ export async function reprojectToEquirectangular(
 
         if (srcX < -0.5 || srcX >= rw - 0.5 || srcY < -0.5 || srcY >= rh - 0.5) continue;
 
-        // Bilinear sample
-        const sx0 = Math.floor(srcX);
-        const sy0 = Math.floor(srcY);
-        const fx = srcX - sx0;
-        const fy = srcY - sy0;
-        const sx1 = Math.min(sx0 + 1, rw - 1);
-        const sy1 = Math.min(sy0 + 1, rh - 1);
-
-        const i00 = (sy0 * rw + sx0) * 4;
-        const i10 = (sy0 * rw + sx1) * 4;
-        const i01 = (sy1 * rw + sx0) * 4;
-        const i11 = (sy1 * rw + sx1) * 4;
+        // Lanczos2 sample
+        const [cr, cg, cb, ca] = sampleLanczos2(sourceData, rw, rh, srcX, srcY);
 
         const outIdx = (ty * panoW + wrappedTx) * 4;
-        for (let c = 0; c < 4; c++) {
-          const top = sourceData[i00 + c] * (1 - fx) + sourceData[i10 + c] * fx;
-          const bottom = sourceData[i01 + c] * (1 - fx) + sourceData[i11 + c] * fx;
-          output[outIdx + c] = Math.round(top * (1 - fy) + bottom * fy);
-        }
+        output[outIdx] = cr;
+        output[outIdx + 1] = cg;
+        output[outIdx + 2] = cb;
+        output[outIdx + 3] = ca;
       }
     }
   }
