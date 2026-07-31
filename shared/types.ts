@@ -77,6 +77,8 @@ export interface Layer {
   // B2: Mask bên trong tileCoords (Brush/Lasso strokes)
   // Tọa độ các point cũng trong hệ pixel ảnh gốc
   maskData: MaskShape[];
+  maskEnabled?: boolean;  // true + maskData → limits display scope; default false → full layer
+  maskForAi?: boolean;   // true = send mask to AI to limit generation scope; default true
 
   prompt: string;
   resultImageId: string;  // filename in cache dir (SHA256 hash of result image)
@@ -103,6 +105,7 @@ export interface PerspectiveRenderRequest {
   viewport: { width: number; height: number };
   rect: { x: number; y: number; width: number; height: number };
   mode: 'full-frame' | 'free-select';
+  scaleFactor?: number;
 }
 
 export interface PerspectiveRenderResponse {
@@ -115,6 +118,8 @@ export interface ReprojectRequest {
   resultImageId: string;
   selection: SelectionDraft;
   imagePath: string;
+  maskEnabled?: boolean;
+  maskData?: MaskShape[];
 }
 
 export interface ReprojectResponse {
@@ -147,6 +152,9 @@ export interface ModelCatalogResponse {
 
 export interface MaskShape {
   type: 'brush' | 'rect' | 'lasso';
+  id?: string;           // stable identity for mask management UI
+  enabled?: boolean;     // false = excluded from mask baking; defaults true
+  action?: 'add' | 'subtract';  // 'add' = include in mask (brush/lasso), 'subtract' = remove from mask (eraser); default 'add'
   // Brush: mảng points cho mỗi stroke (pixel ảnh gốc)
   points?: { x: number; y: number }[];
   // Rect/Lasso bounding (pixel ảnh gốc)
