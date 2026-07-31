@@ -2,16 +2,11 @@ import { Router } from 'express';
 import fs from 'fs/promises';
 import multer from 'multer';
 import path from 'path';
-import { createRequire } from 'module';
-import type { Archiver, ArchiverOptions } from 'archiver';
+import { ZipArchive } from 'archiver';
 import AdmZip from 'adm-zip';
 import { createHash, randomUUID } from 'crypto';
 import { CACHE_DIR } from '../services/image-processor';
 import type { ProjectFile } from '../../shared/types';
-
-// @types/archiver v8 lacks the default factory export; the runtime module exports it
-const require = createRequire(import.meta.url);
-const archiver = require('archiver') as (format: string, options?: ArchiverOptions) => Archiver;
 
 export const projectRouter = Router();
 
@@ -76,7 +71,7 @@ projectRouter.post('/download', async (req, res) => {
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${baseName}.360project"`);
 
-    const archive = archiver('zip', { zlib: { level: 1 } });
+    const archive = new ZipArchive({ zlib: { level: 1 } });
     archive.on('error', (err) => {
       if (!res.headersSent) {
         res.status(500).json({ error: err.message });
