@@ -14,6 +14,7 @@ test('rectangle selection locks camera and only enables rectangle', () => {
     rect: true,
     brush: false,
     lasso: false,
+    eraser: false,
     undo: false,
     ai: false,
   });
@@ -26,6 +27,7 @@ test('canvas edit enables mask tools and AI only', () => {
     rect: false,
     brush: true,
     lasso: true,
+    eraser: true,
     undo: true,
     ai: true,
   });
