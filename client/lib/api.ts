@@ -51,6 +51,7 @@ export const api = {
       viewport: { width: number; height: number };
       rect: { x: number; y: number; width: number; height: number };
       mode: 'full-frame' | 'free-select';
+      scaleFactor?: number;
     }) =>
       request<{ resultImageId: string; width: number; height: number }>('POST', '/image/perspective-render', body),
     reproject: (body: import('../../shared/types').ReprojectRequest) =>
@@ -93,5 +94,11 @@ export const api = {
       }
       return res.json();
     },
+  },
+  filesystem: {
+    browse: (dirPath?: string) =>
+      request<{ path: string; parent: string | null; directories: { name: string; path: string }[] }>(
+        'GET', `/filesystem/browse${dirPath ? `?path=${encodeURIComponent(dirPath)}` : ''}`,
+      ),
   },
 };

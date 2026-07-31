@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useProjectStore } from '../stores/project';
 
@@ -10,23 +10,97 @@ interface Props {
 const FORMATS = ['jpeg', 'png', 'webp', 'avif'] as const;
 
 export default function ExportDialog({ open, onClose }: Props) {
-  const [format, setFormat] = useState<typeof FORMATS[number]>('jpeg');
-  const [quality, setQuality] = useState(95);
-  const [outputPath, setOutputPath] = useState('');
-  const [exporting, setExporting] = useState(false);
-  const [done, setDone] = useState(false);
-  const [error, setError] = useState('');
-
   const imagePath = useProjectStore((s) => s.imagePath);
   const layers = useProjectStore((s) => s.layers);
   const horizon = useProjectStore((s) => s.horizon);
 
+  const [format, setFormat] = useState<typeof FORMATS[number]>('jpeg');
+  const [quality, setQuality] = useState(95);
+  const [outputDir, setOutputDir] = useState('');
+  const [filename, setFilename] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState('');
+  const [browseOpen, setBrowseOpen] = useState(false);
+  const [browsePath, setBrowsePath] = useState('');
+  const [browseDirs, setBrowseDirs] = useState<{ name: string; path: string }[]>([]);
+  const [browseParent, setBrowseParent] = useState<string | null>(null);
+  const [homeDir, setHomeDir] = useState('');
+
+  // Initialize homeDir from server on first mount
+  useEffect(() => {
+    api.filesystem.browse().then(r => setHomeDir(r.path)).catch(() => setHomeDir('/tmp'));
+  }, []);
+
+  // Reset all state when dialog opens
+  useEffect(() => {
+    if (!open) return;
+    const base = (imagePath?.split('/').pop()?.split('\\').pop()?.replace(/\.\w+$/, '') ?? 'panorama');
+    setOutputDir('');
+    setFilename(`${base}-edited`);
+    setFormat('jpeg');
+    setQuality(95);
+    setExporting(false);
+    setDone(false);
+    setError('');
+    setBrowseOpen(false);
+  }, [open, imagePath]);
+
   if (!open) return null;
 
+  const defaultName = () => {
+    const base = (imagePath?.split('/').pop()?.split('\\').pop()?.replace(/\.\w+$/, '') ?? 'panorama');
+    return `${base}-edited`;
+  };
+
+  const close = () => {
+    setDone(false);
+    setError('');
+    setExporting(false);
+    setBrowseOpen(false);
+    onClose();
+  };
+
+  const openBrowse = async (initialPath?: string) => {
+    setBrowseOpen(true);
+    try {
+      const result = await api.filesystem.browse(initialPath);
+      setBrowsePath(result.path);
+      setBrowseDirs(result.directories);
+      setBrowseParent(result.parent);
+    } catch (err: any) {
+      setError(err.message);
+      setBrowseOpen(false);
+    }
+  };
+
+  const navigateTo = async (dirPath: string) => {
+    try {
+      const result = await api.filesystem.browse(dirPath);
+      setBrowsePath(result.path);
+      setBrowseDirs(result.directories);
+      setBrowseParent(result.parent);
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  const selectDir = () => {
+    setOutputDir(browsePath);
+    setBrowseOpen(false);
+  };
+
+  const fullPath = () => {
+    const name = filename.trim() || defaultName();
+    const dir = outputDir || homeDir || '/tmp';
+    return `${dir}/${name}.${format}`;
+  };
+
   const handleExport = async () => {
-    if (!outputPath.trim() || !imagePath) return;
+    if (!imagePath) return;
     setExporting(true);
     setError('');
+    const outputPath = fullPath();
     try {
       await api.image.export({
         path: imagePath,
@@ -45,61 +119,129 @@ export default function ExportDialog({ open, onClose }: Props) {
   };
 
   return (
-    <div style={styles.overlay}>
-      <div style={styles.dialog}>
-        <h2 style={styles.title}>Export Image</h2>
+    <>
+      <div className="modal-overlay">
+        <div className="modal-box" style={{ width: 440 }}>
+          <h2>Export Image</h2>
 
-        <label style={styles.label}>
-          Format:
-          <select value={format} onChange={(e) => setFormat(e.target.value as any)} style={styles.select}>
-            {FORMATS.map((f) => <option key={f} value={f}>{f.toUpperCase()}</option>)}
-          </select>
-        </label>
+          <div className="modal-row">
+            <label>Format:</label>
+            <select value={format} onChange={(e) => setFormat(e.target.value as any)}>
+              {FORMATS.map((f) => <option key={f} value={f}>{f.toUpperCase()}</option>)}
+            </select>
+          </div>
 
-        <label style={styles.label}>
-          Quality: {quality}%
-          <input type="range" min={1} max={100} value={quality}
-            onChange={(e) => setQuality(Number(e.target.value))} style={styles.range} />
-        </label>
+          <div className="modal-row">
+            <label>Quality: {quality}%</label>
+            <input type="range" min={1} max={100} value={quality}
+              onChange={(e) => setQuality(Number(e.target.value))} />
+          </div>
 
-        <label style={styles.label}>
-          Output path:
-          <input type="text" value={outputPath}
-            onChange={(e) => setOutputPath(e.target.value)}
-            placeholder="/home/user/panorama_edited.jpg"
-            style={styles.input} />
-        </label>
+          <div className="modal-row">
+            <label>Save to:</label>
+            <input
+              value={outputDir}
+              onChange={(e) => setOutputDir(e.target.value)}
+              placeholder={homeDir || '/tmp'}
+              readOnly
+              style={{ cursor: 'pointer' }}
+              onClick={() => openBrowse(outputDir || undefined)}
+            />
+            <button className="modal-btn modal-btn-secondary" onClick={() => openBrowse(outputDir || undefined)}>
+              📂
+            </button>
+          </div>
 
-        <div style={styles.actions}>
-          <button onClick={onClose} style={styles.cancelBtn}>Cancel</button>
-          <button onClick={handleExport} disabled={exporting || !outputPath.trim() || done}
-            style={{ ...styles.exportBtn, opacity: exporting ? 0.5 : 1 }}>
-            {done ? '✅ Done' : exporting ? '⏳ Exporting...' : 'Export'}
-          </button>
+          <div className="modal-row">
+            <label>File name:</label>
+            <input
+              value={filename}
+              onChange={(e) => setFilename(e.target.value)}
+              placeholder={defaultName()}
+            />
+            <span style={{ color: '#888', fontSize: 12, whiteSpace: 'nowrap' }}>.{format}</span>
+          </div>
+
+          {outputDir && filename.trim() && (
+            <p style={{ fontSize: 11, color: '#888', marginTop: -4, marginBottom: 8 }}>
+              → {fullPath()}
+            </p>
+          )}
+
+          {done ? (
+            <div style={{ marginTop: 16 }}>
+              <p style={{ color: '#4caf50', fontSize: 13, marginBottom: 12 }}>
+                ✅ Exported to {fullPath()}
+              </p>
+              <div className="modal-actions">
+                <button className="modal-btn modal-btn-primary" onClick={close}>Close</button>
+              </div>
+            </div>
+          ) : (
+            <div className="modal-actions">
+              <button className="modal-btn modal-btn-secondary" onClick={close}>Cancel</button>
+              <button
+                className="modal-btn modal-btn-primary"
+                disabled={exporting || !outputDir.trim()}
+                onClick={() => void handleExport()}
+              >
+                {exporting ? '⏳ Exporting...' : 'Export'}
+              </button>
+            </div>
+          )}
+
+          {error && <p style={{ color: '#ef5350', fontSize: 13, marginTop: 12 }}>{error}</p>}
         </div>
-
-        {error && <p style={styles.error}>{error}</p>}
       </div>
-    </div>
+
+      {/* Directory browser modal */}
+      {browseOpen && (
+        <div className="modal-overlay" style={{ zIndex: 1001 }}>
+          <div className="modal-box" style={{ width: 480, maxHeight: '80vh', overflow: 'auto' }}>
+            <h2>Select Directory</h2>
+            <div style={{ marginBottom: 12 }}>
+              <button
+                className="modal-btn modal-btn-secondary"
+                disabled={!browseParent}
+                onClick={() => browseParent && navigateTo(browseParent)}
+                style={{ marginRight: 8 }}
+              >
+                ⬆ Up
+              </button>
+              <span style={{ fontSize: 12, color: '#ccc', wordBreak: 'break-all' }}>{browsePath}</span>
+            </div>
+            <div style={{ maxHeight: 400, overflow: 'auto', marginBottom: 12 }}>
+              {browseDirs.map((dir) => (
+                <div
+                  key={dir.path}
+                  onClick={() => navigateTo(dir.path)}
+                  style={{
+                    padding: '8px 10px',
+                    cursor: 'pointer',
+                    borderRadius: 4,
+                    fontSize: 13,
+                    color: '#ccc',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                  onMouseEnter={(e) => { (e.target as HTMLElement).style.background = '#0f3460'; }}
+                  onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
+                >
+                  📁 {dir.name}
+                </div>
+              ))}
+              {browseDirs.length === 0 && (
+                <p style={{ color: '#888', fontSize: 12, fontStyle: 'italic', padding: 8 }}>No subdirectories</p>
+              )}
+            </div>
+            <div className="modal-actions">
+              <button className="modal-btn modal-btn-secondary" onClick={() => setBrowseOpen(false)}>Cancel</button>
+              <button className="modal-btn modal-btn-primary" onClick={selectDir}>Select "{browsePath.split('/').pop()}"</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  overlay: {
-    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-  },
-  dialog: {
-    background: '#1a1a2e', padding: 24, borderRadius: 12, width: 400,
-    border: '1px solid #333', color: '#fff',
-  },
-  title: { margin: '0 0 20px 0', fontSize: 20 },
-  label: { display: 'block', marginBottom: 16, fontSize: 14, color: '#ccc' },
-  select: { width: '100%', padding: 8, marginTop: 4, background: '#16213e', color: '#fff', border: '1px solid #444', borderRadius: 6 },
-  input: { width: '100%', padding: 8, marginTop: 4, background: '#16213e', color: '#fff', border: '1px solid #444', borderRadius: 6, boxSizing: 'border-box' },
-  range: { width: '100%', marginTop: 4 },
-  actions: { display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 20 },
-  cancelBtn: { padding: '8px 20px', background: '#444', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' },
-  exportBtn: { padding: '8px 20px', background: '#0d7377', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' },
-  error: { color: '#ef5350', fontSize: 13, marginTop: 12 },
-};

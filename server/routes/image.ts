@@ -98,7 +98,8 @@ imageRouter.post('/perspective-render', async (req, res) => {
       height: metadata.height ?? 4096,
     };
 
-    const result = await renderPerspective(imagePath, viewPose, viewport, effectiveRect, panoramaSize);
+    const scaleFactor = (req.body as any).scaleFactor ?? 1;
+    const result = await renderPerspective(imagePath, viewPose, viewport, effectiveRect, panoramaSize, scaleFactor);
 
     // Cache the rendered perspective
     const hash = createHash('sha256').update(result.buffer).digest('hex');
@@ -118,7 +119,7 @@ imageRouter.post('/perspective-render', async (req, res) => {
 
 imageRouter.post('/reproject', async (req, res) => {
   try {
-    const { resultImageId, selection, imagePath } = req.body as ReprojectRequest;
+    const { resultImageId, selection, imagePath, maskEnabled, maskData } = req.body as ReprojectRequest;
     if (!resultImageId || !selection || !imagePath) {
       return res.status(400).json({ error: 'resultImageId, selection, and imagePath are required' });
     }
@@ -132,8 +133,8 @@ imageRouter.post('/reproject', async (req, res) => {
       height: metadata.height ?? 4096,
     };
 
-    // Reconstruct minimal layer from selection data
-    const layer = { selection } as any;
+    // Reconstruct minimal layer from selection + mask state for reprojection
+    const layer = { selection, maskEnabled, maskData } as any;
 
     const reprojected = await reprojectToEquirectangular(resultPath, layer, panoramaSize);
 

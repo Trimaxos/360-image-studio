@@ -7,6 +7,7 @@ import { config } from './config';
 import { imageRouter } from './routes/image';
 import { aiRouter } from './routes/ai';
 import { projectRouter } from './routes/project';
+import { filesystemRouter } from './routes/filesystem';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -21,6 +22,7 @@ app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
 app.use('/api/image', imageRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/project', projectRouter);
+app.use('/api/filesystem', filesystemRouter);
 
 // Static + SPA fallback (keep at bottom)
 const clientDist = path.join(__dirname, '..', 'dist', 'client');
