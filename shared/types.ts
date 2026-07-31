@@ -190,7 +190,7 @@ export interface TranslateResponse {
 // ===== Project =====
 
 export interface ProjectFile {
-  version: 2;
+  version: 3;
   imagePath: string;
   layers: Layer[];
   horizon: Horizon;
