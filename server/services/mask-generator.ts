@@ -10,38 +10,83 @@ export async function createMaskFromShapes(
   width: number,
   height: number
 ): Promise<Buffer> {
-  const svgParts: string[] = [];
+  const active = shapes.filter((s) => s.enabled !== false);
+  const addShapes = active.filter((s) => s.action !== 'subtract');
+  const subShapes = active.filter((s) => s.action === 'subtract');
 
-  for (const shape of shapes) {
+  // 1. Render additive shapes as white on transparent
+  const addSvgParts: string[] = [];
+  for (const shape of addShapes) {
     if (shape.type === 'brush' && shape.points) {
       const pts = shape.points.map(p => `${p.x},${p.y}`).join(' ');
-      svgParts.push(
+      addSvgParts.push(
         `<polyline points="${pts}" fill="none" stroke="white" stroke-width="25" stroke-linecap="round" stroke-linejoin="round" opacity="1"/>`
       );
     } else if (shape.type === 'rect') {
-      svgParts.push(
+      addSvgParts.push(
         `<rect x="${shape.x}" y="${shape.y}" width="${shape.w}" height="${shape.h}" fill="white" opacity="1"/>`
       );
     } else if (shape.type === 'lasso' && shape.points) {
       const pts = shape.points.map(p => `${p.x},${p.y}`).join(' ');
-      svgParts.push(
+      addSvgParts.push(
         `<polygon points="${pts}" fill="white" opacity="1"/>`
       );
     }
   }
 
-  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">${svgParts.join('')}</svg>`;
+  // 2. Render subtractive shapes as white on transparent (will be used with dest-out)
+  const subSvgParts: string[] = [];
+  for (const shape of subShapes) {
+    if (shape.type === 'brush' && shape.points) {
+      const pts = shape.points.map(p => `${p.x},${p.y}`).join(' ');
+      subSvgParts.push(
+        `<polyline points="${pts}" fill="none" stroke="white" stroke-width="25" stroke-linecap="round" stroke-linejoin="round" opacity="1"/>`
+      );
+    } else if (shape.type === 'lasso' && shape.points) {
+      const pts = shape.points.map(p => `${p.x},${p.y}`).join(' ');
+      subSvgParts.push(
+        `<polygon points="${pts}" fill="white" opacity="1"/>`
+      );
+    }
+  }
 
-  // Render SVG lên transparent canvas
-  return sharp({
+  const svgW = Math.round(width);
+  const svgH = Math.round(height);
+
+  // Render additive mask
+  const addSvg = `<svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">${addSvgParts.join('')}</svg>`;
+  let maskBuffer = await sharp({
     create: {
-      width: Math.round(width),
-      height: Math.round(height),
+      width: svgW,
+      height: svgH,
       channels: 4,
       background: { r: 0, g: 0, b: 0, alpha: 0 },
     },
   })
-    .composite([{ input: Buffer.from(svg), blend: 'over' }])
+    .composite([{ input: Buffer.from(addSvg), blend: 'over' }])
     .png()
     .toBuffer();
+
+  // Apply subtractive shapes via dest-out
+  if (subSvgParts.length > 0) {
+    const subSvg = `<svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">${subSvgParts.join('')}</svg>`;
+    const subBuffer = await sharp({
+      create: {
+        width: svgW,
+        height: svgH,
+        channels: 4,
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      },
+    })
+      .composite([{ input: Buffer.from(subSvg), blend: 'over' }])
+      .png()
+      .toBuffer();
+
+    maskBuffer = await sharp(maskBuffer)
+      .composite([{ input: subBuffer, blend: 'dest-out' }])
+      .png()
+      .toBuffer();
+  }
+
+  return maskBuffer;
 }
