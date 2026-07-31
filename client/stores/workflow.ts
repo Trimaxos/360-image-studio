@@ -21,6 +21,7 @@ export interface WorkflowPermissions {
   rect: boolean;
   brush: boolean;
   lasso: boolean;
+  eraser: boolean;
   undo: boolean;
   ai: boolean;
 }
@@ -44,6 +45,7 @@ export function permissionsFor(state: WorkflowState): WorkflowPermissions {
     rect: state === 'rect-select',
     brush: state === 'canvas-edit' || state === 'ai-review',
     lasso: state === 'canvas-edit' || state === 'ai-review',
+    eraser: state === 'canvas-edit' || state === 'ai-review',
     undo: state === 'canvas-edit' || state === 'ai-review',
     ai: state === 'canvas-edit' || state === 'ai-review',
   };
