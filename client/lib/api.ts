@@ -79,15 +79,24 @@ export const api = {
       request<{ base64Result: string; provider: string; model: string }>('POST', '/ai/edit', body),
   },
   project: {
-    load: (projectPath: string) =>
-      request<any>('POST', '/project/load', { projectPath }),
-    save: (projectPath: string, project: any) =>
-      request<any>('POST', '/project/save', { projectPath, project }),
-    // Upload .360project file from browser
-    upload: async (file: File): Promise<{ project: any; projectPath: string }> => {
+    // Download project as ZIP bundle (.360project)
+    download: async (projectState: any): Promise<Blob> => {
+      const res = await fetch(`${BASE}/project/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project: projectState }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      return res.blob();
+    },
+    // Upload .360project (ZIP v3 or JSON v2) — auto-detected by server
+    uploadZip: async (file: File): Promise<{ project: any }> => {
       const formData = new FormData();
       formData.append('project', file);
-      const res = await fetch(`${BASE}/project/upload`, { method: 'POST', body: formData });
+      const res = await fetch(`${BASE}/project/upload-zip`, { method: 'POST', body: formData });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: res.statusText }));
         throw new Error(err.error || `HTTP ${res.status}`);
