@@ -5,6 +5,7 @@ import {
   copyPngBlob,
   downloadBlob,
 } from '../lib/canvas-exchange';
+import { fabricToMaskData } from '../lib/mask-utils';
 import { useProjectStore } from '../stores/project';
 import UnsavedChangesDialog from './UnsavedChangesDialog';
 import VariantGallery from './VariantGallery';
@@ -50,7 +51,7 @@ export default function CanvasEditor() {
     let disposed = false;
     setSourceStatus('loading');
     setSourceError('');
-    import('fabric').then(async ({ Canvas, FabricImage, PencilBrush, Polygon, Polyline }) => {
+    import('fabric').then(async ({ Canvas, FabricImage, Path, PencilBrush, Polygon, Polyline }) => {
       try {
         if (disposed || !canvasRef.current) return;
         const parent = canvasRef.current.parentElement!;
@@ -76,6 +77,48 @@ export default function CanvasEditor() {
       canvas.add(image);
       canvas.requestRenderAll();
       setSourceStatus('ready');
+
+      // Restore saved mask shapes from layer data
+      const savedShapes = activeLayer?.maskData ?? [];
+      if (savedShapes.length > 0) {
+        const fromNative = (p: { x: number; y: number }) => ({
+          x: p.x * scale + image.left!,
+          y: p.y * scale + image.top!,
+        });
+        for (const shape of savedShapes) {
+          if (shape.enabled === false) continue;
+          if (shape.type === 'brush' && shape.points && shape.points.length > 0) {
+            const canvasPoints = shape.points.map(fromNative);
+            if (canvasPoints.length >= 2) {
+              const d = canvasPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+              const pathObj = new Path(d, {
+                stroke: 'rgba(233,69,96,.55)',
+                strokeWidth: 24,
+                fill: 'transparent',
+                selectable: false,
+                evented: false,
+              }) as any;
+              pathObj._shapeId = shape.id; // stable ID for merge
+              if (shape.action === 'subtract') pathObj._maskAction = 'subtract';
+              canvas.add(pathObj);
+            }
+          } else if (shape.type === 'lasso' && shape.points && shape.points.length >= 3) {
+            const canvasPoints = shape.points.map(fromNative);
+            const polygon = new Polygon(canvasPoints, {
+              fill: 'rgba(233,69,96,.38)',
+              stroke: '#e94560',
+              strokeWidth: 2,
+              selectable: false,
+              evented: false,
+            }) as any;
+            polygon._shapeId = shape.id; // stable ID for merge
+            if (shape.action === 'subtract') polygon._maskAction = 'subtract';
+            canvas.add(polygon);
+          }
+        }
+        canvas.requestRenderAll();
+      }
+
       canvas.freeDrawingBrush = new PencilBrush(canvas);
       canvas.freeDrawingBrush.color = 'rgba(233,69,96,.55)';
       canvas.freeDrawingBrush.width = 24;
@@ -117,6 +160,15 @@ export default function CanvasEditor() {
         canvas.requestRenderAll();
         return result;
       };
+      // Extract mask shapes in native tile coordinates for the mask management panel
+      const exportMaskShapes = () => {
+        const scale = image.scaleX!;
+        const toNative = (p: { x: number; y: number }) => ({
+          x: (p.x - image.left!) / scale,
+          y: (p.y - image.top!) / scale,
+        });
+        return fabricToMaskData(canvas, toNative);
+      };
       canvas.on('path:created', () => {
         const current = useProjectStore.getState();
         if (current.selectionDraft) {
@@ -125,6 +177,8 @@ export default function CanvasEditor() {
             maskBase64: exportMask(),
           });
         }
+        current.markDirty();
+        useProjectStore.setState({ maskDirty: true });
       });
       let lassoPoints: Array<{ x: number; y: number }> = [];
       let lassoPreview: any = null;
@@ -164,6 +218,8 @@ export default function CanvasEditor() {
           if (current.selectionDraft) {
             current.setSelectionDraft({ ...current.selectionDraft, maskBase64: exportMask() });
           }
+          current.markDirty();
+          useProjectStore.setState({ maskDirty: true });
         }
         lassoPoints = [];
       });
@@ -177,11 +233,14 @@ export default function CanvasEditor() {
           if (current.selectionDraft) {
             current.setSelectionDraft({ ...current.selectionDraft, maskBase64: exportMask() });
           }
+          current.markDirty();
+          useProjectStore.setState({ maskDirty: true });
         }
       };
       window.addEventListener('canvas-undo', undo);
       fabricRef.current = canvas;
       state.setGetMaskBase64(exportMask);
+      state.setGetMaskShapes(exportMaskShapes);
       const observer = new ResizeObserver(() => {
         canvas.setDimensions({ width: parent.clientWidth, height: parent.clientHeight });
         canvas.requestRenderAll();
@@ -205,6 +264,7 @@ export default function CanvasEditor() {
         fabricRef.current = null;
       }
       useProjectStore.getState().setGetMaskBase64(null);
+      useProjectStore.getState().setGetMaskShapes(null);
     };
   }, [
     state.imagePath,
@@ -218,10 +278,31 @@ export default function CanvasEditor() {
 
   useEffect(() => {
     if (!fabricRef.current) return;
-    fabricRef.current.isDrawingMode = state.activeTool === 'brush';
-    if (fabricRef.current.freeDrawingBrush) {
-      fabricRef.current.freeDrawingBrush.width = state.activeTool === 'lasso' ? 3 : 24;
+    const canvas = fabricRef.current;
+    canvas.isDrawingMode = state.activeTool === 'brush' || state.activeTool === 'eraser';
+    if (canvas.freeDrawingBrush) {
+      if (state.activeTool === 'eraser') {
+        canvas.freeDrawingBrush.color = 'rgba(255,100,100,0.7)';
+        canvas.freeDrawingBrush.width = 40;
+      } else if (state.activeTool === 'lasso') {
+        canvas.freeDrawingBrush.width = 3;
+        canvas.freeDrawingBrush.color = 'rgba(233,69,96,.55)';
+      } else {
+        canvas.freeDrawingBrush.color = 'rgba(233,69,96,.55)';
+        canvas.freeDrawingBrush.width = 24;
+      }
     }
+    // Tag eraser paths so fabricToMaskData can set action:'subtract'
+    const isEraser = state.activeTool === 'eraser';
+    const onPathCreated = (e: any) => {
+      if (isEraser && e.path) {
+        e.path._maskAction = 'subtract';
+      }
+    };
+    canvas.on('path:created', onPathCreated);
+    return () => {
+      canvas.off('path:created', onPathCreated);
+    };
   }, [state.activeTool]);
 
   const back = () => {

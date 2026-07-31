@@ -45,23 +45,59 @@ export function maskToBoundingBox(shapes: MaskShape[]): { x: number; y: number; 
 
 import type { MaskShape as SharedMaskShape } from '../../shared/types';
 
-export function fabricToMaskData(fabricCanvas: any): SharedMaskShape[] {
+export function fabricToMaskData(
+  fabricCanvas: any,
+  transform?: (p: { x: number; y: number }) => { x: number; y: number },
+): SharedMaskShape[] {
+  const t = transform ?? ((p: { x: number; y: number }) => p);
   const shapes: SharedMaskShape[] = [];
   const objects = fabricCanvas.getObjects();
 
   for (const obj of objects) {
     if (obj.type === 'path') {
-      // Brush stroke
       shapes.push({
         type: 'brush',
-        points: obj.path?.map((p: any) => ({ x: p[1], y: p[2] })) ?? [],
+        id: (obj as any)._shapeId || crypto.randomUUID(),
+        enabled: true,
+        action: (obj as any)._maskAction === 'subtract' ? 'subtract' : 'add',
+        points: obj.path?.map((p: any) => t({ x: p[1], y: p[2] })) ?? [],
+      });
+    } else if (obj.type === 'polygon') {
+      shapes.push({
+        type: 'lasso',
+        id: (obj as any)._shapeId || crypto.randomUUID(),
+        enabled: true,
+        action: (obj as any)._maskAction === 'subtract' ? 'subtract' : 'add',
+        points: obj.points?.map((p: any) => t({ x: p.x, y: p.y })) ?? [],
       });
     } else if (obj.type === 'rect') {
-      shapes.push({ type: 'rect', x: obj.left, y: obj.top, w: obj.width! * obj.scaleX!, h: obj.height! * obj.scaleY! });
+      const tl = t({ x: obj.left, y: obj.top });
+      shapes.push({
+        type: 'rect',
+        id: (obj as any)._shapeId || crypto.randomUUID(),
+        enabled: true,
+        x: tl.x, y: tl.y,
+        w: obj.width! * obj.scaleX!,
+        h: obj.height! * obj.scaleY!,
+      });
     }
   }
 
   return shapes;
+}
+
+/**
+ * Generate a solid white mask at the given dimensions.
+ * Used when maskForAi is OFF — white mask = AI regenerates entire tile.
+ */
+export function createWhiteMask(width: number, height: number): Promise<string> {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, width, height);
+  return Promise.resolve(canvas.toDataURL('image/png').split(',')[1]);
 }
 
 export interface RectWithResolution {

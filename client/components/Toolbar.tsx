@@ -21,6 +21,7 @@ export default function Toolbar({ onExport, onSave }: Props) {
     { id: 'rect' as const, icon: '▭', label: 'Rectangle Select', enabled: permission.rect },
     { id: 'brush' as const, icon: '🖊', label: 'Brush Mask', enabled: permission.brush },
     { id: 'lasso' as const, icon: '⌁', label: 'Lasso', enabled: permission.lasso },
+    { id: 'eraser' as const, icon: '⌫', label: 'Eraser', enabled: permission.eraser },
   ];
 
   return (

@@ -5,8 +5,10 @@ import ImageDropZone from './components/ImageDropZone';
 import LayerPanel from './components/LayerPanel';
 import PromptBar from './components/PromptBar';
 import Toolbar from './components/Toolbar';
+import { downloadBlob } from './lib/canvas-exchange';
 import { api } from './lib/api';
 import { useProjectStore } from './stores/project';
+import type { ProjectFile } from '../shared/types';
 import FlatView from './views/FlatView';
 import Viewer360 from './views/Viewer360';
 
@@ -35,22 +37,35 @@ export default function App() {
   const saveProject = useCallback(async () => {
     const current = useProjectStore.getState();
     if (!current.imagePath) return;
-    const projectPath = current.imagePath.replace(/\.\w+$/, '.360project');
-    await api.project.save(projectPath, {
-      version: 2,
+    const project: ProjectFile = {
+      version: 3,
       imagePath: current.imagePath,
       layers: current.layers,
       horizon: current.horizon,
-    });
-    alert(`Đã lưu project: ${projectPath}`);
+    };
+    try {
+      const zipBlob = await api.project.download(project);
+      const base = current.imagePath.split('/').pop()?.split('\\').pop()?.replace(/\.\w+$/, '') ?? 'project';
+      downloadBlob(zipBlob, `${base}.360project`);
+    } catch (err: any) {
+      alert(`Save failed: ${err.message}`);
+    }
   }, []);
 
   const loadProject = useCallback(async (file: File) => {
-    const { project } = await api.project.upload(file);
-    const meta = await api.image.open(project.imagePath);
-    state.openImage(project.imagePath, meta.width, meta.height);
-    useProjectStore.setState({ layers: project.layers ?? [] });
-  }, [state.openImage]);
+    try {
+      const { project } = await api.project.uploadZip(file);
+      const meta = await api.image.open(project.imagePath);
+      useProjectStore.getState().openImage(project.imagePath, meta.width, meta.height);
+      useProjectStore.setState({
+        layers: project.layers ?? [],
+        horizon: project.horizon ?? { yaw: 0, pitch: 0, roll: 0 },
+      });
+      setFileSize(meta.sizeBytes);
+    } catch (err: any) {
+      alert(`Load failed: ${err.message}`);
+    }
+  }, []);
 
   const canvasWorkflow = ['canvas-edit', 'generating', 'ai-review'].includes(state.workflow);
   return (
@@ -77,7 +92,7 @@ export default function App() {
           <div className="file-menu-popover">
             <button onClick={() => imageInput.current?.click()}>📂 Open Image</button>
             <button onClick={() => projectInput.current?.click()}>📋 Load Project</button>
-            <button disabled={!state.imagePath} onClick={() => void saveProject()}>💾 Save Project</button>
+            <button disabled={!state.imagePath} onClick={() => void saveProject()}>💾 Download Project</button>
             <button disabled={!state.imagePath || !committed} onClick={() => setExportOpen(true)}>📤 Export Final</button>
             <button disabled={!state.imagePath} onClick={state.reset}>↻ New</button>
           </div>

@@ -105,13 +105,25 @@ export async function exportImage(
         await fs.access(cacheFile);
 
         if (layer.type === 'perspective') {
-          const { projectPerspectiveLayer } = await import('./perspective-projector');
-          const projected = await projectPerspectiveLayer(cacheFile, layer, panoramaSize);
-          pipeline = pipeline.composite([{ input: projected, top: 0, left: 0, blend: 'over' }]);
+          // Prefer pre-rendered equirectangular buffer
+          if (layer.equirectImageId) {
+            const eqFile = path.join(CACHE_DIR, `${layer.equirectImageId}.png`);
+            try {
+              await fs.access(eqFile);
+              pipeline = pipeline.composite([{ input: eqFile, top: 0, left: 0, blend: 'over' }]);
+              continue;
+            } catch {
+              // File missing — fall through to reproject
+            }
+          }
+          // Fallback: reproject at composite time (legacy layers, or if equirectImageId missing)
+          const { reprojectToEquirectangular } = await import('./perspective-projector');
+          const reprojected = await reprojectToEquirectangular(cacheFile, layer, panoramaSize);
+          pipeline = pipeline.composite([{ input: reprojected, top: 0, left: 0, blend: 'over' }]);
           continue;
         }
 
-        if (layer.selection?.maskBase64) {
+        if (layer.maskEnabled && layer.selection?.maskBase64) {
           const maskedResult = await applyBase64Mask(cacheFile, layer.selection.maskBase64);
           pipeline = pipeline.composite([{
             input: maskedResult,
@@ -122,32 +134,42 @@ export async function exportImage(
           continue;
         }
 
-        // Nếu có maskData, tạo mask từ maskData để blend mượt
-        // thay vì overlay toàn bộ tile hình chữ nhật
-        if (layer.maskData && layer.maskData.length > 0) {
-          const { createMaskFromShapes } = await import('./mask-generator');
-          const maskBuffer = await createMaskFromShapes(
-            layer.maskData,
-            Math.round(layer.tileCoords.w),
-            Math.round(layer.tileCoords.h)
-          );
+        // Apply mask from maskData shapes only when per-layer toggle is on
+        if (layer.maskEnabled && layer.maskData && layer.maskData.length > 0) {
+          const activeShapes = layer.maskData.filter((s) => s.enabled !== false);
+          if (activeShapes.length > 0) {
+            const { createMaskFromShapes } = await import('./mask-generator');
+            const maskBuffer = await createMaskFromShapes(
+              activeShapes,
+              Math.round(layer.tileCoords.w),
+              Math.round(layer.tileCoords.h)
+            );
 
-          // maskBuffer: white shapes on transparent background (RGBA)
-          // Dùng 'dest-in' để giữ result chỉ ở vùng mask không trong suốt
-          const maskedResult = await sharp(cacheFile)
-            .composite([{ input: maskBuffer, blend: 'dest-in' }])
-            .png()
-            .toBuffer();
+            // maskBuffer: white shapes on transparent background (RGBA)
+            // Use 'dest-in' to keep result only in non-transparent mask regions
+            const maskedResult = await sharp(cacheFile)
+              .composite([{ input: maskBuffer, blend: 'dest-in' }])
+              .png()
+              .toBuffer();
 
-          // Composite: result ĐÃ masked (có alpha đúng) lên ảnh gốc
-          pipeline = pipeline.composite([{
-            input: maskedResult,
-            top: Math.round(layer.tileCoords.y),
-            left: Math.round(layer.tileCoords.x),
-            blend: 'over',
-          }]);
+            // Composite: masked result (with correct alpha) onto original
+            pipeline = pipeline.composite([{
+              input: maskedResult,
+              top: Math.round(layer.tileCoords.y),
+              left: Math.round(layer.tileCoords.x),
+              blend: 'over',
+            }]);
+          } else {
+            // No active shapes → blend full tile
+            pipeline = pipeline.composite([{
+              input: cacheFile,
+              top: Math.round(layer.tileCoords.y),
+              left: Math.round(layer.tileCoords.x),
+              blend: 'over',
+            }]);
+          }
         } else {
-          // Fallback: không có mask → blend toàn bộ tile
+          // No mask toggle or no mask → blend full tile
           pipeline = pipeline.composite([{
             input: cacheFile,
             top: Math.round(layer.tileCoords.y),

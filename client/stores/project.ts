@@ -4,6 +4,7 @@ import type {
   GeneratedVariant,
   Horizon,
   Layer,
+  MaskShape,
   SelectionDraft,
   ViewPose,
 } from '../../shared/types';
@@ -18,7 +19,7 @@ export interface RectSelect {
   nativeH: number;
 }
 
-export type ActiveTool = 'brush' | 'rect' | 'lasso' | null;
+export type ActiveTool = 'brush' | 'rect' | 'lasso' | 'eraser' | null;
 export type ViewMode = 'viewer' | 'canvas';
 
 interface EditSnapshot {
@@ -48,6 +49,8 @@ export interface ProjectState {
   previewImage: string | null;
   previewLayer: Partial<Layer> | null;
   getMaskBase64: (() => string | null) | null;
+  getMaskShapes: (() => MaskShape[]) | null;
+  maskDirty: boolean;
 
   openImage(path: string, width: number, height: number): void;
   updateViewPose(pose: Partial<ViewPose>): void;
@@ -63,6 +66,8 @@ export interface ProjectState {
   setHorizon(horizon: Partial<Horizon>): void;
   setPreview(imageBase64: string | null, layer?: Partial<Layer>): void;
   setGetMaskBase64(fn: (() => string | null) | null): void;
+  setGetMaskShapes(fn: (() => MaskShape[]) | null): void;
+  setLayerMask(id: string, patch: Partial<Pick<Layer, 'maskEnabled' | 'maskData' | 'maskForAi'>>): Promise<void>;
   setSelectionDraft(selection: SelectionDraft | null): void;
   markDirty(): void;
   setSelectedModel(model: AiModelOption | null): void;
@@ -103,6 +108,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   previewImage: null,
   previewLayer: null,
   getMaskBase64: null,
+  getMaskShapes: null,
+  maskDirty: false,
 
   openImage: (imagePath, imageWidth, imageHeight) => set({
     imagePath,
@@ -137,6 +144,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       ...selection.viewPose,
       tileCoords: { x: 0, y: 0, w: perspWidth, h: perspHeight },
       maskData: [],
+      maskEnabled: false,
+      maskForAi: true,
       prompt: selection.prompt,
       resultImageId,
       status: 'draft',
@@ -162,6 +171,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       selectionDraft: layer.selection ?? null,
       editSnapshot: { layer: structuredClone(layer), selection: layer.selection ?? null },
       dirty: false,
+      maskDirty: false,
       generatedVariants: [],
       selectedVariantId: null,
     };
@@ -175,6 +185,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setHorizon: (horizon) => get().updateViewPose(horizon),
   setPreview: (previewImage, previewLayer) => set({ previewImage, previewLayer: previewLayer ?? null }),
   setGetMaskBase64: (getMaskBase64) => set({ getMaskBase64 }),
+  setGetMaskShapes: (getMaskShapes) => set({ getMaskShapes }),
+  setLayerMask: async (id, patch) => {
+    const { layers } = get();
+    const layer = layers.find((l) => l.id === id);
+    if (!layer) return;
+    const next = { ...layer, ...patch };
+    set({ layers: layers.map((l) => l.id === id ? next : l), dirty: true, maskDirty: true });
+    // Reprojection no longer happens here. User must click "Apply Mask" or "Apply AI".
+  },
   setSelectionDraft: (selectionDraft) => set({ selectionDraft, dirty: true }),
   markDirty: () => set({ dirty: true }),
   setSelectedModel: (selectedModel) => set({ selectedModel }),
@@ -197,8 +216,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // Update existing layer (created on Apply Rect) with latest selection state
       const draft = state.selectionDraft;
       if (draft) {
+        const shapes = get().getMaskShapes?.() ?? [];
         layers = layers.map((layer): Layer => layer.id === state.activeLayerId
-          ? { ...layer, prompt: draft.prompt, selection: draft, status: 'committed' as const }
+          ? {
+            ...layer,
+            prompt: draft.prompt,
+            selection: draft,
+            maskData: shapes,
+            maskForAi: layer.maskForAi ?? true,
+            status: 'committed' as const,
+          }
           : layer);
       }
     }
@@ -211,6 +238,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       viewLock: null,
       editSnapshot: null,
       dirty: false,
+      maskDirty: false,
       generatedVariants: [],
       selectedVariantId: null,
       previewImage: null,
@@ -264,10 +292,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     selectionDraft: null,
     editSnapshot: null,
     dirty: false,
+    maskDirty: false,
     generatedVariants: [],
     selectedVariantId: null,
     previewImage: null,
     previewLayer: null,
     getMaskBase64: null,
+    getMaskShapes: null,
   }),
 }));

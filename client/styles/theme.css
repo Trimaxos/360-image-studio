@@ -472,6 +472,7 @@ html, body, #root {
   overflow: hidden;
 }
 .viewer-viewport {
+  position: relative;
   aspect-ratio: 2 / 1;
   width: min(80%, 900px);
   max-width: 900px;
@@ -631,6 +632,9 @@ html, body, #root {
   background: var(--border);
   color: #ccc;
 }
+.modal-row input[readonly] {
+  cursor: pointer;
+}
 
 /* ===== Lock Edit Bar ===== */
 .edit-lock-bar {
@@ -725,6 +729,7 @@ html, body, #root {
   position: relative;
 }
 .viewer-viewport {
+  position: relative;
   width: 100%;
   height: 100%;
   max-width: none;
@@ -979,4 +984,55 @@ html, body, #root {
 }
 .layer-item.hidden-layer {
   opacity: .48;
+}
+
+/* ===== Mask Panel ===== */
+.mask-panel {
+  border-top: 1px solid var(--border);
+  padding: 10px 12px;
+  font-size: 12px;
+}
+.mask-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: var(--text2);
+  cursor: pointer;
+}
+.mask-toggle-row input {
+  accent-color: var(--accent);
+}
+.mask-empty {
+  color: var(--text2);
+  font-size: 11px;
+  font-style: italic;
+}
+.mask-shape-list {
+  list-style: none;
+}
+.mask-shape-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  color: var(--text2);
+}
+.mask-shape-item span {
+  flex: 1;
+  text-transform: capitalize;
+}
+.mask-shape-item button {
+  background: none;
+  border: none;
+  color: var(--text2);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 1px 3px;
+}
+.mask-shape-item button.on {
+  color: var(--success);
+}
+.mask-shape-item button.off {
+  color: #555;
 }

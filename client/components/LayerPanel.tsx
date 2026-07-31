@@ -4,6 +4,22 @@ import { useProjectStore } from '../stores/project';
 export default function LayerPanel() {
   const state = useProjectStore();
   const sorted = [...state.layers].sort((a, b) => b.order - a.order);
+  const activeLayer = state.layers.find((l) => l.id === state.activeLayerId);
+
+  const toggleMaskShape = (shapeId: string) => {
+    if (!activeLayer) return;
+    const maskData = (activeLayer.maskData ?? []).map((s) =>
+      s.id === shapeId ? { ...s, enabled: !(s.enabled !== false) } : s,
+    );
+    void state.setLayerMask(activeLayer.id, { maskData });
+  };
+
+  const removeMaskShape = (shapeId: string) => {
+    if (!activeLayer) return;
+    const maskData = (activeLayer.maskData ?? []).filter((s) => s.id !== shapeId);
+    void state.setLayerMask(activeLayer.id, { maskData });
+  };
+
   return (
     <aside className="layer-panel">
       <div className="panel-header">
@@ -32,6 +48,45 @@ export default function LayerPanel() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+      {activeLayer && state.workflow === 'canvas-edit' && (
+        <div className="mask-panel">
+          <label className="mask-toggle-row" title="When ON, mask shapes are sent to AI to limit generation scope. When OFF, AI generates on the full tile.">
+            <input
+              type="checkbox"
+              checked={activeLayer.maskForAi !== false}
+              onChange={(e) => { void state.setLayerMask(activeLayer.id, { maskForAi: e.target.checked }); }}
+            />
+            Use mask for AI
+          </label>
+          <label className="mask-toggle-row" title="When enabled, mask shapes limit the display scope. When disabled, the full layer is shown.">
+            <input
+              type="checkbox"
+              checked={activeLayer.maskEnabled === true}
+              onChange={(e) => { void state.setLayerMask(activeLayer.id, { maskEnabled: e.target.checked }); }}
+            />
+            Apply mask (limit display)
+          </label>
+          {(activeLayer.maskData ?? []).length === 0 ? (
+            <p className="mask-empty">No mask shapes</p>
+          ) : (
+            <ul className="mask-shape-list">
+              {(activeLayer.maskData ?? []).map((shape) => (
+                <li key={shape.id} className="mask-shape-item">
+                  <span>{shape.type}</span>
+                  <button
+                    className={shape.enabled !== false ? 'on' : 'off'}
+                    onClick={() => toggleMaskShape(shape.id!)}
+                    title={shape.enabled !== false ? 'Disable' : 'Enable'}
+                  >
+                    {shape.enabled !== false ? '👁' : '🚫'}
+                  </button>
+                  <button onClick={() => removeMaskShape(shape.id!)} title="Delete">🗑</button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
     </aside>

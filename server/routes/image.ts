@@ -5,8 +5,8 @@ import fs from 'fs/promises';
 import multer from 'multer';
 import sharp from 'sharp';
 import { openImage, getTile, serveImage, exportImage, CACHE_DIR } from '../services/image-processor';
-import { renderPerspective, calcPerspectiveResolution } from '../services/perspective-projector';
-import type { ImageOpenRequest, ImageOpenResponse, TileRequest, ExportRequest, PerspectiveRenderRequest } from '../../shared/types';
+import { renderPerspective, calcPerspectiveResolution, reprojectToEquirectangular } from '../services/perspective-projector';
+import type { ImageOpenRequest, ImageOpenResponse, TileRequest, ExportRequest, PerspectiveRenderRequest, ReprojectRequest } from '../../shared/types';
 
 export const imageRouter = Router();
 
@@ -98,7 +98,8 @@ imageRouter.post('/perspective-render', async (req, res) => {
       height: metadata.height ?? 4096,
     };
 
-    const result = await renderPerspective(imagePath, viewPose, viewport, effectiveRect, panoramaSize);
+    const scaleFactor = (req.body as any).scaleFactor ?? 1;
+    const result = await renderPerspective(imagePath, viewPose, viewport, effectiveRect, panoramaSize, scaleFactor);
 
     // Cache the rendered perspective
     const hash = createHash('sha256').update(result.buffer).digest('hex');
@@ -111,6 +112,39 @@ imageRouter.post('/perspective-render', async (req, res) => {
       width: result.width,
       height: result.height,
     });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+imageRouter.post('/reproject', async (req, res) => {
+  try {
+    const { resultImageId, selection, imagePath, maskEnabled, maskData } = req.body as ReprojectRequest;
+    if (!resultImageId || !selection || !imagePath) {
+      return res.status(400).json({ error: 'resultImageId, selection, and imagePath are required' });
+    }
+
+    const resultPath = path.join(CACHE_DIR, `${resultImageId}.png`);
+    await fs.access(resultPath); // verify exists
+
+    const metadata = await sharp(imagePath).metadata();
+    const panoramaSize = {
+      width: metadata.width ?? 8192,
+      height: metadata.height ?? 4096,
+    };
+
+    // Reconstruct minimal layer from selection + mask state for reprojection
+    const layer = { selection, maskEnabled, maskData } as any;
+
+    const reprojected = await reprojectToEquirectangular(resultPath, layer, panoramaSize);
+
+    // Cache the reprojected equirectangular buffer
+    const hash = createHash('sha256').update(reprojected).digest('hex');
+    const cacheFile = path.join(CACHE_DIR, `${hash}.png`);
+    await fs.mkdir(path.dirname(cacheFile), { recursive: true });
+    await fs.writeFile(cacheFile, reprojected);
+
+    res.json({ equirectImageId: hash });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
