@@ -27,20 +27,50 @@ class LocalProvider implements AiProvider {
 
 class FalProvider implements AiProvider {
   name = 'fal' as const;
-  constructor(public modelId: string) {}
+  constructor(
+    public modelId: string,
+    private inputProperties: string[] = [],
+  ) {}
   async edit(base64Image: string, base64Mask: string, prompt: string) {
     if (!config.falAiKey) throw new Error('FAL_AI_KEY chưa được cấu hình');
+
+    const imageDataUri = `data:image/png;base64,${base64Image}`;
+    const maskDataUri = `data:image/png;base64,${base64Mask}`;
+    const props = this.inputProperties;
+
+    // Build request body dynamically based on model's input schema
+    const body: Record<string, any> = { prompt };
+
+    // Image input: support both image_url (single) and image_urls (array)
+    if (props.includes('image_urls')) {
+      body.image_urls = [imageDataUri];
+    } else if (props.includes('image_url')) {
+      body.image_url = imageDataUri;
+    } else {
+      // Fallback: try image_url
+      body.image_url = imageDataUri;
+    }
+
+    // Mask input: support mask_url, mask_image_url, or skip if not supported
+    if (props.includes('mask_url')) {
+      body.mask_url = maskDataUri;
+    } else if (props.includes('mask_image_url')) {
+      body.mask_image_url = maskDataUri;
+    }
+    // If model doesn't support mask, we don't send it — the model does prompt-only editing
+
+    // Sync mode for faster response
+    if (props.includes('sync_mode')) {
+      body.sync_mode = true;
+    }
+
     const response = await fetch(`https://fal.run/${this.modelId}`, {
       method: 'POST',
       headers: {
         Authorization: `Key ${config.falAiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        image_url: `data:image/png;base64,${base64Image}`,
-        mask_url: `data:image/png;base64,${base64Mask}`,
-        prompt,
-      }),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(180_000),
     });
     if (!response.ok) throw new Error(`fal.ai error: ${response.status} ${await response.text()}`);
@@ -56,8 +86,12 @@ class FalProvider implements AiProvider {
   }
 }
 
-export function getProviderFor(provider: 'local' | 'fal', modelId: string): AiProvider {
-  if (provider === 'fal') return new FalProvider(modelId);
+export function getProviderFor(
+  provider: 'local' | 'fal',
+  modelId: string,
+  inputProperties?: string[],
+): AiProvider {
+  if (provider === 'fal') return new FalProvider(modelId, inputProperties);
   const model = config.localModels.find((item) => item.id === modelId);
   if (!model) throw new Error(`Local model not configured: ${modelId}`);
   if (!model.enabled) throw new Error(`Local model disabled: ${modelId}`);
@@ -70,8 +104,9 @@ export async function aiEdit(
   base64Image: string,
   base64Mask: string,
   prompt: string,
+  inputProperties?: string[],
 ) {
-  const provider = getProviderFor(providerName, modelId);
+  const provider = getProviderFor(providerName, modelId, inputProperties);
   const result = await provider.edit(base64Image, base64Mask, prompt);
   return { ...result, provider: provider.name };
 }

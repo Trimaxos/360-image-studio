@@ -93,10 +93,14 @@ function stopLocalAi() {
 
 // Start local AI, then listen
 startLocalAi().then(() => {
-  app.listen(config.port, () => {
+  const server = app.listen(config.port, () => {
     console.log(`360 Image Studio running on http://localhost:${config.port}`);
   });
+  server.on('error', (err: any) => console.error('[server error]', err.message));
+  server.on('close', () => console.log('[server closed]'));
 });
 
 process.on('SIGINT', () => { stopLocalAi(); process.exit(); });
 process.on('SIGTERM', () => { stopLocalAi(); process.exit(); });
+process.on('unhandledRejection', (reason) => console.error('[unhandledRejection]', reason));
+process.on('uncaughtException', (err) => console.error('[uncaughtException]', err));

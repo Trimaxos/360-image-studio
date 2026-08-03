@@ -39,7 +39,9 @@ export default function ModelSelector({ disabled }: { disabled: boolean }) {
           <optgroup key={group.provider} label={group.label}>
             {group.models.map((model) => (
               <option key={model.id} value={`${model.provider}:${model.id}`} disabled={!model.enabled}>
-                {model.displayName}{model.disabledReason ? ` — ${model.disabledReason}` : ''}
+                {model.description ? `${model.description}: ` : ''}{model.displayName}
+                {model.hasMask === false ? ' (no mask)' : ''}
+                {model.disabledReason ? ` — ${model.disabledReason}` : ''}
               </option>
             ))}
           </optgroup>

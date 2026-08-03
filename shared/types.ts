@@ -139,6 +139,12 @@ export interface AiModelOption {
   capabilities: Array<'inpainting' | 'image-edit'>;
   enabled: boolean;
   disabledReason?: string;
+  /** Human-readable role description for the UI (e.g. "Mặc định", "Xóa vật thể") */
+  description?: string;
+  /** Input property names the model accepts (e.g. image_url, mask_url, prompt) */
+  inputProperties?: string[];
+  /** Whether the model supports mask input for inpainting */
+  hasMask?: boolean;
 }
 
 export interface ModelCatalogResponse {

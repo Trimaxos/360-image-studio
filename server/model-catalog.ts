@@ -2,13 +2,38 @@ import fs from 'node:fs/promises';
 import type { AiModelOption, ModelCatalogResponse } from '../shared/types';
 import { config } from './config';
 
-type FalRecord = Record<string, any>;
 const supportedInputs = new Set([
-  'image_url', 'image', 'mask_url', 'mask', 'prompt',
+  'image_url', 'image_urls', 'image', 'mask_url', 'mask', 'prompt',
   'strength', 'num_inference_steps', 'guidance_scale', 'seed',
   'output_format', 'safety_tolerance', 'sync_mode', 'num_images',
+  'image_size', 'enable_safety_checker', 'dilate_pixels',
 ]);
 const minimumLocalArtifactBytes = 6_000_000_000;
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+let cachedCatalog: { fal: AiModelOption[]; ts: number } | null = null;
+
+// ===== Curated model list =====
+
+interface CuratedModel {
+  id: string;
+  price: string; // shown at end of display name
+}
+
+const CURATED_FAL_MODELS: CuratedModel[] = [
+  { id: 'fal-ai/flux-2/klein/9b/edit', price: '$0.022' },
+  { id: 'fal-ai/flux-kontext-lora/inpaint', price: '$0.035/MP' },
+  { id: 'fal-ai/flux-2-pro/edit', price: '~$0.045' },
+  { id: 'bytedance/seedream/v5/lite/edit', price: '$0.035/ảnh' },
+  { id: 'fal-ai/qwen-image-edit/inpaint', price: '$0.030/MP' },
+  { id: 'fal-ai/flux-pro/kontext', price: '$0.040/ảnh' },
+  { id: 'fal-ai/flux-2/edit', price: '$0.024' },
+  { id: 'fal-ai/bytedance/seedream/v4.5/edit', price: '$0.040/ảnh' },
+  { id: 'fal-ai/flux-2/turbo/edit', price: '$0.016' },
+  { id: 'fal-ai/flux-2-max/edit', price: '~$0.10' },
+];
+
+// ===== Local model helpers =====
 
 export function localArtifactComplete(sizeBytes: number): boolean {
   return sizeBytes >= minimumLocalArtifactBytes;
@@ -19,52 +44,59 @@ export function isLocalRuntimeReady(payload: unknown): boolean {
   return health?.status === 'ready' && health.modelLoaded === true;
 }
 
-function strings(value: unknown): string[] {
-  if (!value) return [];
-  if (Array.isArray(value)) return value.flatMap(strings);
-  if (typeof value === 'string') return [value.toLowerCase()];
-  return [];
+// ===== Schema helpers =====
+
+function findInputSchema(schemas: Record<string, any>): { required: string[]; properties: string[] } | null {
+  for (const [key, schema] of Object.entries(schemas)) {
+    if (!(schema && typeof schema === 'object')) continue;
+    const req = schema.required;
+    if (!Array.isArray(req) || req.length === 0) continue;
+    // Skip output/status/file schemas
+    if (/output|queuestatus|image$/i.test(key)) continue;
+    // Must look like an input schema
+    if (/input/i.test(key) || req.some((k: string) => /^(image_urls?|mask_url|mask|prompt)$/i.test(k))) {
+      return {
+        required: req as string[],
+        properties: Array.isArray(schema.properties) ? [] : Object.keys(schema.properties ?? {}),
+      };
+    }
+  }
+  return null;
 }
 
-function requiredInputs(model: FalRecord): string[] {
-  const schemas = model.openapi?.components?.schemas
-    ?? model.open_api?.components?.schemas
-    ?? model.openapi_schema?.components?.schemas
-    ?? {};
-  const input = schemas.Input ?? schemas.input ?? Object.values(schemas).find((schema: any) =>
-    Array.isArray(schema?.required) && schema.required.some((key: string) => /image|prompt|mask/.test(key)));
-  return Array.isArray((input as any)?.required) ? (input as any).required : [];
-}
-
-export function classifyFalModel(model: FalRecord): AiModelOption | null {
-  const id = model.endpoint_id ?? model.id ?? model.model_id;
+export function classifyFalModel(raw: Record<string, any>): AiModelOption | null {
+  const id = raw.endpoint_id ?? raw.id ?? raw.model_id;
   if (!id) return null;
-  const categories = strings([
-    model.category,
-    model.categories,
-    model.metadata?.category,
-    model.metadata?.categories,
-    model.tags,
-  ]);
-  const searchable = `${id} ${categories.join(' ')}`.toLowerCase();
-  const capabilities: AiModelOption['capabilities'] = [];
-  if (/inpaint|fill/.test(searchable)) capabilities.push('inpainting');
-  if (/image-to-image|image.edit|edit|inpaint/.test(searchable)) capabilities.push('image-edit');
-  if (!capabilities.length) return null;
 
-  const required = requiredInputs(model);
+  const schemas = raw.openapi?.components?.schemas
+    ?? raw.open_api?.components?.schemas
+    ?? raw.openapi_schema?.components?.schemas
+    ?? {};
+  const schema = findInputSchema(schemas);
+  const required = schema?.required ?? [];
+  const properties = schema?.properties ?? [];
   const unsupported = required.filter((input) => !supportedInputs.has(input));
+  const hasMask = properties.some((p) => /mask/i.test(p));
+
+  const capabilities: AiModelOption['capabilities'] = [];
+  if (hasMask || /inpaint|fill|erase/i.test(id)) capabilities.push('inpainting');
+  capabilities.push('image-edit');
+
   return {
     id,
-    displayName: model.metadata?.display_name ?? model.name ?? id,
+    displayName: raw.metadata?.display_name ?? raw.name ?? id,
     provider: 'fal',
     capabilities: [...new Set(capabilities)],
     enabled: unsupported.length === 0,
     disabledReason: unsupported.length
       ? `Cần input chưa hỗ trợ: ${unsupported.join(', ')}`
       : undefined,
+    inputProperties: properties,
+    hasMask,
   };
 }
+
+// ===== Local options =====
 
 async function localOptions(): Promise<AiModelOption[]> {
   return Promise.all(config.localModels.map(async (model) => {
@@ -102,28 +134,61 @@ async function localOptions(): Promise<AiModelOption[]> {
   }));
 }
 
+// ===== Fal.ai curated options =====
+
 async function falOptions(): Promise<AiModelOption[]> {
-  const found = new Map<string, AiModelOption>();
-  let cursor = '';
-  do {
-    const url = new URL('https://api.fal.ai/v1/models');
-    url.searchParams.set('status', 'active');
-    url.searchParams.set('expand', 'openapi-3.0');
-    if (cursor) url.searchParams.set('cursor', cursor);
-    const response = await fetch(url, {
-      headers: config.falAiKey ? { Authorization: `Key ${config.falAiKey}` } : {},
-      signal: AbortSignal.timeout(20_000),
-    });
-    if (!response.ok) throw new Error(`fal.ai catalog: HTTP ${response.status}`);
-    const data = await response.json() as any;
-    const models = data.models ?? data.items ?? [];
-    for (const raw of models) {
-      const item = classifyFalModel(raw);
-      if (item) found.set(item.id, item);
-    }
-    cursor = data.next_cursor ?? data.nextCursor ?? '';
-  } while (cursor);
-  return [...found.values()].sort((a, b) => a.displayName.localeCompare(b.displayName));
+  if (cachedCatalog && Date.now() - cachedCatalog.ts < CACHE_TTL_MS) {
+    return cachedCatalog.fal;
+  }
+
+  // Fetch all 5 curated models in one batch
+  const params = new URLSearchParams();
+  params.set('expand', 'openapi-3.0');
+  for (const m of CURATED_FAL_MODELS) params.append('endpoint_id', m.id);
+
+  const response = await fetch(`https://api.fal.ai/v1/models?${params.toString()}`, {
+    headers: config.falAiKey ? { Authorization: `Key ${config.falAiKey}` } : {},
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  if (!response.ok) {
+    throw new Error(`fal.ai catalog: HTTP ${response.status}`);
+  }
+
+  const data = await response.json() as any;
+  const models = data.models ?? data.items ?? [];
+
+  const priceMap = new Map(CURATED_FAL_MODELS.map((m) => [m.id, m.price]));
+
+  const result: AiModelOption[] = [];
+  for (const raw of models) {
+    const item = classifyFalModel(raw);
+    if (!item) continue;
+    const price = priceMap.get(item.id);
+    if (price) item.displayName = `${item.displayName} — ${price}`;
+    result.push(item);
+  }
+
+  // Ensure order matches CURATED_FAL_MODELS
+  result.sort((a, b) => {
+    const ia = CURATED_FAL_MODELS.findIndex((m) => m.id === a.id);
+    const ib = CURATED_FAL_MODELS.findIndex((m) => m.id === b.id);
+    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+  });
+
+  cachedCatalog = { fal: result, ts: Date.now() };
+  return result;
+}
+
+// ===== Public API =====
+
+export async function getModelInfo(modelId: string): Promise<AiModelOption | undefined> {
+  const catalog = await getModelCatalog();
+  for (const group of catalog.groups) {
+    const found = group.models.find((m) => m.id === modelId);
+    if (found) return found;
+  }
+  return undefined;
 }
 
 export async function getModelCatalog(): Promise<ModelCatalogResponse> {
