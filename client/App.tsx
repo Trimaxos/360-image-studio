@@ -38,7 +38,7 @@ export default function App() {
     const current = useProjectStore.getState();
     if (!current.imagePath) return;
     const project: ProjectFile = {
-      version: 3,
+      version: 4,
       imagePath: current.imagePath,
       layers: current.layers,
       horizon: current.horizon,

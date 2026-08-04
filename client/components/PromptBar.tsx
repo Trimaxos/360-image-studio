@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import type { Layer, MaskShape } from '../../shared/types';
+import type { MaskShape } from '../../shared/types';
 import { api } from '../lib/api';
 import { blobToBase64, createWhiteMask } from '../lib/mask-utils';
 import { permissionsFor } from '../stores/workflow';
@@ -12,7 +12,6 @@ export default function PromptBar() {
   const [prompt, setPrompt] = useState('');
   const [error, setError] = useState('');
   const generating = state.workflow === 'generating';
-  const selectedVariant = state.generatedVariants.find((item) => item.id === state.selectedVariantId);
   const activeLayer = state.layers.find((l) => l.id === state.activeLayerId);
 
   useEffect(() => {
@@ -23,6 +22,7 @@ export default function PromptBar() {
     const selection = state.selectionDraft;
     const model = state.selectedModel;
     const mask = state.getMaskBase64?.();
+    const layerId = state.activeLayerId;
     if (!selection || !state.imagePath || !model || !prompt.trim()) return;
 
     const useMaskForAi = activeLayer?.maskForAi !== false; // default true
@@ -66,6 +66,27 @@ export default function PromptBar() {
         prompt: translated,
       });
       state.setSelectionDraft({ ...selection, prompt });
+
+      // Persist to server cache — MUST happen before creating variant
+      const { resultImageId } = await api.image.saveResultCache(result.base64Result);
+
+      // Add as LayerVariant to active layer (variant system)
+      if (layerId) {
+        const variant: import('../../shared/types').LayerVariant = {
+          id: crypto.randomUUID(),
+          resultImageId,
+          source: 'ai-generated',
+          modelId: result.model,
+          applied: false,
+          width: activeLayer?.tileCoords.w ?? selection.tileCoords.w,
+          height: activeLayer?.tileCoords.h ?? selection.tileCoords.h,
+          createdAt: Date.now(),
+        };
+        state.addVariantToLayer(layerId, variant);
+        // Auto-select the newly generated variant
+        state.toggleVariant(layerId, variant.id);
+      }
+
       state.addGeneratedVariant({
         id: crypto.randomUUID(),
         base64Result: result.base64Result,
@@ -79,49 +100,50 @@ export default function PromptBar() {
 
   const applySelected = async () => {
     const selection = state.selectionDraft;
-    if (!selectedVariant || !selection) return;
+    const layer = state.layers.find((l) => l.id === state.activeLayerId);
+    if (!layer || !selection || !state.imagePath) return;
+
+    // Find the applied variant for this layer
+    const appliedVariant = (layer.variants ?? []).find((v) => v.applied);
+    if (!appliedVariant) {
+      setError('Chưa chọn kết quả nào để apply.');
+      return;
+    }
+
     setError('');
     state.setWorkflow('generating'); // show loading state during reprojection
     try {
-      const { resultImageId } = await api.image.saveResultCache(selectedVariant.base64Result);
-
-      const existing = state.activeLayerId ? state.layers.find((layer) => layer.id === state.activeLayerId) : null;
-      const shapes = existing?.maskData ?? state.getMaskShapes?.() ?? [];
-      const maskEnabled = existing?.maskEnabled ?? false;
-
-      // For perspective layers, reproject immediately so 360 view has the equirectangular buffer ready
+      // For perspective layers, reproject the applied variant to equirectangular
       let equirectImageId: string | undefined;
       if (selection.sourceView === '360') {
+        const shapes = layer.maskData ?? [];
         const reprojResult = await api.image.reproject({
-          resultImageId,
+          resultImageId: appliedVariant.resultImageId,
           selection,
-          imagePath: state.imagePath!,
-          maskEnabled,
+          imagePath: state.imagePath,
+          maskEnabled: false,           // visibility mask is handled separately
           maskData: shapes.filter((s) => s.enabled !== false),
         });
         equirectImageId = reprojResult.equirectImageId;
       }
 
-      const layer: Layer = {
-        id: existing?.id ?? crypto.randomUUID(),
-        order: existing?.order ?? state.layers.length + 1,
-        type: selection.sourceView === '360' ? 'perspective' : 'flat',
-        visible: existing?.visible ?? true,
-        ...selection.viewPose,
-        tileCoords: existing?.tileCoords ?? selection.tileCoords,
-        maskData: shapes,
-        maskEnabled,
-        maskForAi: existing?.maskForAi ?? true,
-        prompt,
-        resultImageId,
-        equirectImageId,
+      // Commit the layer (variant already has applied=true).
+      // Set layer.resultImageId to the applied variant's cache file so re-generating
+      // the layer edits the current result (not the untouched original tile).
+      // Store the reprojected equirect on the VARIANT so export composites the right
+      // variant even if the user toggles to another variant afterwards.
+      state.updateLayer(layer.id, {
         status: 'committed',
-        selection: { ...selection, prompt },
-      };
-      if (existing) state.updateLayer(existing.id, layer);
-      else state.addLayer(layer);
+        resultImageId: appliedVariant.resultImageId,
+        equirectImageId: equirectImageId ?? layer.equirectImageId,
+        variants: (layer.variants ?? []).map((v) =>
+          v.id === appliedVariant.id && equirectImageId
+            ? { ...v, equirectImageId }
+            : v,
+        ),
+      });
+
       useProjectStore.setState({
-        activeLayerId: layer.id,
         workflow: 'canvas-edit',
         dirty: false,
         maskDirty: false,
@@ -130,6 +152,7 @@ export default function PromptBar() {
       });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Apply thất bại');
+      state.setWorkflow('canvas-edit');
     }
   };
 
@@ -211,7 +234,7 @@ export default function PromptBar() {
       {permission.ai && (
         <button
           className="prompt-btn prompt-btn-apply"
-          disabled={!selectedVariant}
+          disabled={!activeLayer?.variants?.find(v => v.applied)}
           onClick={() => void applySelected()}
         >
           Apply Selected

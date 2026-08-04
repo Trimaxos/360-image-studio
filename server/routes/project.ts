@@ -8,6 +8,33 @@ import { createHash, randomUUID } from 'crypto';
 import { CACHE_DIR } from '../services/image-processor';
 import type { ProjectFile } from '../../shared/types';
 
+/**
+ * Migrate a legacy project (v2/v3) to v4: auto-create a default variant for each
+ * layer that has a legacy resultImageId but no variants yet. applied = true for any
+ * layer that is not explicitly a draft — v2 layers have no status field, so they
+ * are treated as applied (their result was already committed).
+ */
+function migrateProjectToV4(project: { version: number; layers: any[] }): void {
+  project.version = 4;
+  project.layers = project.layers.map((layer) => {
+    if (!layer.variants && layer.resultImageId) {
+      return {
+        ...layer,
+        variants: [{
+          id: randomUUID(),
+          resultImageId: layer.resultImageId,
+          source: 'ai-generated' as const,
+          applied: layer.status !== 'draft',
+          width: layer.tileCoords?.w ?? 1024,
+          height: layer.tileCoords?.h ?? 1024,
+          createdAt: Date.now(),
+        }],
+      };
+    }
+    return { ...layer, variants: layer.variants ?? [] };
+  });
+}
+
 export const projectRouter = Router();
 
 const zipUpload = multer({
@@ -43,7 +70,19 @@ projectRouter.post('/download', async (req, res) => {
     await fs.mkdir(cacheDir, { recursive: true });
     const seen = new Set<string>();
     for (const layer of project.layers) {
+      // Legacy resultImageId (backward compat)
       for (const id of [layer.resultImageId, layer.equirectImageId]) {
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        const src = path.join(CACHE_DIR, `${id}.png`);
+        try {
+          await fs.access(src);
+          await fs.copyFile(src, path.join(cacheDir, `${id}.png`));
+        } catch { /* skip missing cache files */ }
+      }
+      // Variant cache files (v4)
+      for (const variant of (layer.variants ?? [])) {
+        const id = variant.resultImageId;
         if (!id || seen.has(id)) continue;
         seen.add(id);
         const src = path.join(CACHE_DIR, `${id}.png`);
@@ -57,7 +96,7 @@ projectRouter.post('/download', async (req, res) => {
     // Write project.json with relative paths
     const projectJson: ProjectFile = {
       ...project,
-      version: 3,
+      version: 4,
       imagePath: `original${origExt}`,
     };
     await fs.writeFile(
@@ -118,6 +157,8 @@ projectRouter.post('/upload-zip', zipUpload.single('project'), async (req, res) 
           error: `Project references image that doesn't exist: ${project.imagePath}`,
         });
       }
+      // v2 layers have no variants — migrate so export still composites them
+      migrateProjectToV4(project);
       await fs.unlink(req.file.path).catch(() => undefined);
       return res.json({ project });
     }
@@ -146,10 +187,15 @@ projectRouter.post('/upload-zip', zipUpload.single('project'), async (req, res) 
     const projectData = await fs.readFile(path.join(extractDir, 'project.json'), 'utf-8');
     const project = JSON.parse(projectData) as Omit<ProjectFile, 'version'> & { version: number };
 
-    if (project.version < 2 || project.version > 3) {
+    if (project.version < 2 || project.version > 4) {
       await fs.rm(extractDir, { recursive: true, force: true });
       await fs.unlink(req.file.path).catch(() => undefined);
       return res.status(400).json({ error: `Unsupported project version: ${project.version}` });
+    }
+
+    // Migrate legacy v2/v3 → v4: auto-create a default variant from the legacy resultImageId
+    if (project.version < 4) {
+      migrateProjectToV4(project);
     }
 
     // Copy original image to CACHE_DIR
@@ -179,13 +225,17 @@ projectRouter.post('/upload-zip', zipUpload.single('project'), async (req, res) 
       }
     } catch { /* no cache dir — fine */ }
 
-    // Remap layer cache IDs
+    // Remap layer cache IDs (including variant resultImageIds)
     const layers = project.layers.map((layer) => ({
       ...layer,
       resultImageId: cacheMap.get(layer.resultImageId) || layer.resultImageId,
       equirectImageId: layer.equirectImageId
         ? (cacheMap.get(layer.equirectImageId) || layer.equirectImageId)
         : undefined,
+      variants: (layer.variants ?? []).map((v) => ({
+        ...v,
+        resultImageId: cacheMap.get(v.resultImageId) || v.resultImageId,
+      })),
     }));
 
     // Cleanup

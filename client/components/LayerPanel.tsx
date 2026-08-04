@@ -60,14 +60,6 @@ export default function LayerPanel() {
             />
             Use mask for AI
           </label>
-          <label className="mask-toggle-row" title="When enabled, mask shapes limit the display scope. When disabled, the full layer is shown.">
-            <input
-              type="checkbox"
-              checked={activeLayer.maskEnabled === true}
-              onChange={(e) => { void state.setLayerMask(activeLayer.id, { maskEnabled: e.target.checked }); }}
-            />
-            Apply mask (limit display)
-          </label>
           {(activeLayer.maskData ?? []).length === 0 ? (
             <p className="mask-empty">No mask shapes</p>
           ) : (

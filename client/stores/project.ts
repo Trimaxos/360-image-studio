@@ -4,6 +4,7 @@ import type {
   GeneratedVariant,
   Horizon,
   Layer,
+  LayerVariant,
   MaskShape,
   SelectionDraft,
   ViewPose,
@@ -67,13 +68,18 @@ export interface ProjectState {
   setPreview(imageBase64: string | null, layer?: Partial<Layer>): void;
   setGetMaskBase64(fn: (() => string | null) | null): void;
   setGetMaskShapes(fn: (() => MaskShape[]) | null): void;
-  setLayerMask(id: string, patch: Partial<Pick<Layer, 'maskEnabled' | 'maskData' | 'maskForAi'>>): Promise<void>;
+  setLayerMask(id: string, patch: Partial<Pick<Layer, 'maskData' | 'maskForAi'>>): Promise<void>;
   setSelectionDraft(selection: SelectionDraft | null): void;
   markDirty(): void;
   setSelectedModel(model: AiModelOption | null): void;
   addGeneratedVariant(variant: GeneratedVariant): void;
   selectVariant(id: string | null): void;
   clearVariants(): void;
+  // Variant management (v4)
+  addVariantToLayer(layerId: string, variant: LayerVariant): void;
+  toggleVariant(layerId: string, variantId: string): void;
+  removeVariantFromLayer(layerId: string, variantId: string): void;
+  updateVariantMask(layerId: string, variantId: string, mask: LayerVariant['visibilityMask']): void;
   leaveCanvas(choice: 'save' | 'discard'): void;
   addLayer(layer: Layer): void;
   updateLayer(id: string, patch: Partial<Layer>): void;
@@ -142,14 +148,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       type: selection.sourceView === '360' ? 'perspective' : 'flat',
       visible: true,
       ...selection.viewPose,
-      tileCoords: { x: 0, y: 0, w: perspWidth, h: perspHeight },
+      tileCoords: selection.sourceView === 'flat'
+        ? { x: selection.tileCoords.x, y: selection.tileCoords.y, w: perspWidth, h: perspHeight }
+        : { x: 0, y: 0, w: perspWidth, h: perspHeight },
       maskData: [],
-      maskEnabled: false,
       maskForAi: true,
       prompt: selection.prompt,
       resultImageId,
       status: 'draft',
       selection,
+      variants: [],
     };
     return {
       layers: [...state.layers, layer],
@@ -204,6 +212,39 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   })),
   selectVariant: (selectedVariantId) => set({ selectedVariantId }),
   clearVariants: () => set({ generatedVariants: [], selectedVariantId: null, previewImage: null }),
+  addVariantToLayer: (layerId, variant) => set((state) => ({
+    layers: state.layers.map((layer) =>
+      layer.id === layerId
+        ? { ...layer, variants: [...(layer.variants ?? []), variant] }
+        : layer
+    ),
+  })),
+  toggleVariant: (layerId, variantId) => set((state) => ({
+    layers: state.layers.map((layer) => {
+      if (layer.id !== layerId) return layer;
+      const variants = (layer.variants ?? []).map((v) => ({
+        ...v,
+        applied: v.id === variantId ? !v.applied : false,
+      }));
+      return { ...layer, variants };
+    }),
+  })),
+  removeVariantFromLayer: (layerId, variantId) => set((state) => ({
+    layers: state.layers.map((layer) =>
+      layer.id === layerId
+        ? { ...layer, variants: (layer.variants ?? []).filter((v) => v.id !== variantId) }
+        : layer
+    ),
+  })),
+  updateVariantMask: (layerId, variantId, mask) => set((state) => ({
+    layers: state.layers.map((layer) => {
+      if (layer.id !== layerId) return layer;
+      const variants = (layer.variants ?? []).map((v) =>
+        v.id === variantId ? { ...v, visibilityMask: mask } : v
+      );
+      return { ...layer, variants };
+    }),
+  })),
   leaveCanvas: (choice) => set((state) => {
     let layers = state.layers;
     let selectionDraft = state.selectionDraft;
@@ -254,6 +295,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     layers: state.layers.filter((layer) => layer.id !== id),
     activeLayerId: state.activeLayerId === id ? null : state.activeLayerId,
   })),
+  // Note: variant cache files are NOT deleted on removeLayer to avoid
+  // accidental data loss. Cache dir is cleaned on reset.
   toggleLayerVisibility: (id) => set((state) => ({
     layers: state.layers.map((layer) => layer.id === id
       ? { ...layer, visible: layer.visible === false }

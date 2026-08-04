@@ -77,7 +77,7 @@ export interface Layer {
   // B2: Mask bên trong tileCoords (Brush/Lasso strokes)
   // Tọa độ các point cũng trong hệ pixel ảnh gốc
   maskData: MaskShape[];
-  maskEnabled?: boolean;  // true + maskData → limits display scope; default false → full layer
+  maskEnabled?: boolean;  // DEPRECATED — use variant.visibilityMask instead
   maskForAi?: boolean;   // true = send mask to AI to limit generation scope; default true
 
   prompt: string;
@@ -86,6 +86,29 @@ export interface Layer {
   status?: 'draft' | 'committed';
   name?: string;
   selection?: SelectionDraft;
+
+  // --- New fields (v4) ---
+  variants?: LayerVariant[];     // Danh sách kết quả AI/import
+}
+
+// ===== Layer Variant =====
+
+export interface LayerVariant {
+  id: string;                    // UUID
+  resultImageId: string;         // filename in cache dir (without .png extension)
+  source: 'ai-generated' | 'imported';
+  modelId?: string;              // model AI đã dùng (nếu ai-generated)
+  applied: boolean;              // true = variant này đang được apply (chỉ 1 variant/layer)
+  equirectImageId?: string;      // filename in cache dir — pre-rendered equirect for THIS variant (perspective layers)
+  visibilityMask?: {
+    base64Mask: string;          // base64 PNG mask (white=visible, black=hidden)
+    brushSize: number;           // px
+    brushSoftness: number;       // 0-100%
+  };
+  /** Kích thước thực tế của ảnh kết quả (pixel) */
+  width: number;
+  height: number;
+  createdAt: number;             // Date.now()
 }
 
 export interface SelectionDraft {
@@ -124,6 +147,18 @@ export interface ReprojectRequest {
 
 export interface ReprojectResponse {
   equirectImageId: string;
+}
+
+export interface VariantMaskCacheRequest {
+  variantId: string;
+  base64Mask: string;
+  softness: number;    // 0-100
+  width: number;
+  height: number;
+}
+
+export interface VariantMaskCacheResponse {
+  featheredMaskId: string;
 }
 
 export interface GeneratedVariant {
@@ -196,7 +231,7 @@ export interface TranslateResponse {
 // ===== Project =====
 
 export interface ProjectFile {
-  version: 3;
+  version: 4;
   imagePath: string;
   layers: Layer[];
   horizon: Horizon;
