@@ -164,7 +164,10 @@ projectRouter.post('/upload-zip', zipUpload.single('project'), async (req, res) 
     }
 
     // v3 ZIP extraction
-    const extractDir = path.join(CACHE_DIR, `project-extract-${randomUUID()}`);
+    // CACHE_DIR can be drive-relative on Windows when HOME is unavailable.
+    // Resolve it before comparing ZIP entry paths so valid entries such as
+    // `cache/` are not rejected against an absolute candidate path.
+    const extractDir = path.resolve(CACHE_DIR, `project-extract-${randomUUID()}`);
     await fs.mkdir(extractDir, { recursive: true });
 
     // Extract ZIP using adm-zip (no shell, cross-platform)

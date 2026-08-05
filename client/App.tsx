@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import CanvasEditor from './components/CanvasEditor';
 import ExportDialog from './components/ExportDialog';
 import ImageDropZone from './components/ImageDropZone';
@@ -22,11 +22,27 @@ export default function App() {
   const state = useProjectStore();
   const [activeTab, setActiveTab] = useState<'360' | 'flat'>('360');
   const [exportOpen, setExportOpen] = useState(false);
+  const [isSavingProject, setIsSavingProject] = useState(false);
   const [fileSize, setFileSize] = useState<number>();
+  const saveInFlight = useRef(false);
   const imageInput = useRef<HTMLInputElement>(null);
   const projectInput = useRef<HTMLInputElement>(null);
+  const fileMenuRef = useRef<HTMLDetailsElement>(null);
   const fileName = state.imagePath?.split('/').pop()?.split('\\').pop();
   const committed = state.layers.some((layer) => layer.status === 'committed');
+  const closeFileMenu = () => {
+    if (fileMenuRef.current) fileMenuRef.current.open = false;
+  };
+
+  useEffect(() => {
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!useProjectStore.getState().hasUnsavedChanges) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+  }, []);
 
   const openFile = useCallback(async (file: File) => {
     const meta = await api.image.upload(file);
@@ -35,8 +51,11 @@ export default function App() {
   }, []);
 
   const saveProject = useCallback(async () => {
+    if (saveInFlight.current) return;
     const current = useProjectStore.getState();
     if (!current.imagePath) return;
+    saveInFlight.current = true;
+    setIsSavingProject(true);
     const project: ProjectFile = {
       version: 4,
       imagePath: current.imagePath,
@@ -47,8 +66,12 @@ export default function App() {
       const zipBlob = await api.project.download(project);
       const base = current.imagePath.split('/').pop()?.split('\\').pop()?.replace(/\.\w+$/, '') ?? 'project';
       downloadBlob(zipBlob, `${base}.360project`);
+      useProjectStore.getState().markProjectSaved();
     } catch (err: any) {
       alert(`Save failed: ${err.message}`);
+    } finally {
+      saveInFlight.current = false;
+      setIsSavingProject(false);
     }
   }, []);
 
@@ -60,6 +83,7 @@ export default function App() {
       useProjectStore.setState({
         layers: project.layers ?? [],
         horizon: project.horizon ?? { yaw: 0, pitch: 0, roll: 0 },
+        hasUnsavedChanges: false,
       });
       setFileSize(meta.sizeBytes);
     } catch (err: any) {
@@ -87,14 +111,16 @@ export default function App() {
           <button className={`top-bar-tab ${activeTab === '360' ? 'active' : ''}`} disabled={state.workflow !== 'viewing'} onClick={() => setActiveTab('360')}>🌐 360 View</button>
           <button className={`top-bar-tab ${activeTab === 'flat' ? 'active' : ''}`} disabled={state.workflow !== 'viewing'} onClick={() => setActiveTab('flat')}>📐 Flat View</button>
         </nav>
-        <details className="file-menu">
+        <details ref={fileMenuRef} className="file-menu">
           <summary>☰ File</summary>
           <div className="file-menu-popover">
-            <button onClick={() => imageInput.current?.click()}>📂 Open Image</button>
-            <button onClick={() => projectInput.current?.click()}>📋 Load Project</button>
-            <button disabled={!state.imagePath} onClick={() => void saveProject()}>💾 Download Project</button>
-            <button disabled={!state.imagePath || !committed} onClick={() => setExportOpen(true)}>📤 Export Final</button>
-            <button disabled={!state.imagePath} onClick={state.reset}>↻ New</button>
+            <button onClick={() => { closeFileMenu(); imageInput.current?.click(); }}>📂 Open Image</button>
+            <button onClick={() => { closeFileMenu(); projectInput.current?.click(); }}>📋 Load Project</button>
+            <button disabled={!state.imagePath || isSavingProject} onClick={() => { closeFileMenu(); void saveProject(); }}>
+              {isSavingProject ? <><span className="inline-spinner" /> Preparing Project…</> : <>💾 Download Project</>}
+            </button>
+            <button disabled={!state.imagePath || !committed} onClick={() => { closeFileMenu(); setExportOpen(true); }}>📤 Export Final</button>
+            <button disabled={!state.imagePath} onClick={() => { closeFileMenu(); state.reset(); }}>↻ New</button>
           </div>
         </details>
         {fileName && <span className="top-bar-file"><strong>{fileName}</strong> · {state.imageWidth} × {state.imageHeight} {fileSize ? `· ${formatFileSize(fileSize)}` : ''}</span>}
@@ -102,7 +128,7 @@ export default function App() {
       </header>
 
       <main className="workspace">
-        <Toolbar onExport={() => setExportOpen(true)} onSave={() => void saveProject()} />
+        <Toolbar onExport={() => setExportOpen(true)} onSave={() => void saveProject()} isSaving={isSavingProject} />
         <section className="editor-area">
           {state.workflow === 'empty'
             ? <ImageDropZone onOpenFile={openFile} />
@@ -118,6 +144,12 @@ export default function App() {
         <span>{state.workflow}</span>
       </footer>
       <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} />
+      {isSavingProject && (
+        <div className="project-save-progress" role="status" aria-live="polite">
+          <span className="inline-spinner" />
+          <span><strong>Đang chuẩn bị project…</strong><small>Đang đóng gói ảnh và dữ liệu, vui lòng chờ.</small></span>
+        </div>
+      )}
     </div>
   );
 }

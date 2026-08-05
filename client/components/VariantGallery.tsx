@@ -1,27 +1,38 @@
-import React, { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { useProjectStore } from '../stores/project';
 import { api } from '../lib/api';
-import type { LayerVariant } from '../../shared/types';
+import ResultMaskEditor from './ResultMaskEditor';
 
-interface Props {
-  onEditMask?: (variant: LayerVariant) => void;
-}
-
-export default function VariantGallery({ onEditMask }: Props) {
+export default function VariantGallery() {
+  const [editingVariantId, setEditingVariantId] = useState<string | null>(null);
   const layers = useProjectStore((s) => s.layers);
   const activeLayerId = useProjectStore((s) => s.activeLayerId);
-  const toggleVariant = useProjectStore((s) => s.toggleVariant);
+  const imagePath = useProjectStore((s) => s.imagePath);
+  const selectVariantForEditing = useProjectStore((s) => s.selectVariantForEditing);
+  const selectOriginalVariant = useProjectStore((s) => s.selectOriginalVariant);
   const removeVariantFromLayer = useProjectStore((s) => s.removeVariantFromLayer);
 
   const activeLayer = layers.find((l) => l.id === activeLayerId);
   const variants = activeLayer?.variants ?? [];
+  const appliedVariant = variants.find((variant) => variant.applied);
+  const originalUrl = activeLayer?.resultImageId
+    ? api.image.cacheUrl(activeLayer.resultImageId)
+    : imagePath && activeLayer
+      ? api.image.tileUrl(
+        imagePath,
+        activeLayer.tileCoords.x,
+        activeLayer.tileCoords.y,
+        activeLayer.tileCoords.w,
+        activeLayer.tileCoords.h,
+      )
+      : '';
 
-  const handleToggle = useCallback(
+  const handleSelect = useCallback(
     (variantId: string) => {
       if (!activeLayerId) return;
-      toggleVariant(activeLayerId, variantId);
+      selectVariantForEditing(activeLayerId, variantId);
     },
-    [activeLayerId, toggleVariant],
+    [activeLayerId, selectVariantForEditing],
   );
 
   const handleDelete = useCallback(
@@ -33,14 +44,27 @@ export default function VariantGallery({ onEditMask }: Props) {
     [activeLayerId, removeVariantFromLayer],
   );
 
-  if (!variants.length) return null;
+  if (!activeLayer || !activeLayerId || !originalUrl) return null;
+  const editingVariant = variants.find((variant) => variant.id === editingVariantId);
 
   return (
     <div className="variant-gallery">
       <div className="variant-gallery-title">
-        Results ({variants.length})
+        Results ({variants.length + 1})
       </div>
       <div className="variant-gallery-list">
+        <div className={`variant-card original ${!appliedVariant ? 'applied' : ''}`}>
+          <div className="variant-thumb-wrapper" onClick={() => selectOriginalVariant(activeLayerId)}>
+            {!appliedVariant && <span className="variant-badge">✓ ĐANG XEM</span>}
+            <img className="variant-thumb" src={originalUrl} alt="Original" />
+          </div>
+          <div className="variant-meta">
+            <span className="variant-source">Original</span>
+            <span className="variant-size">
+              {activeLayer.tileCoords.w}×{activeLayer.tileCoords.h}
+            </span>
+          </div>
+        </div>
         {variants.map((variant) => {
           const isApplied = variant.applied;
           const cacheUrl = api.image.cacheUrl(variant.resultImageId);
@@ -49,7 +73,7 @@ export default function VariantGallery({ onEditMask }: Props) {
               key={variant.id}
               className={`variant-card ${isApplied ? 'applied' : ''}`}
             >
-              <div className="variant-thumb-wrapper" onClick={() => handleToggle(variant.id)}>
+              <div className="variant-thumb-wrapper" onClick={() => handleSelect(variant.id)}>
                 {isApplied && <span className="variant-badge">✓ ĐÃ CHỌN</span>}
                 <img
                   className="variant-thumb"
@@ -66,17 +90,16 @@ export default function VariantGallery({ onEditMask }: Props) {
                 <span className="variant-size">
                   {variant.width}×{variant.height}
                 </span>
+                {variant.visibilityMask?.base64Mask && <span className="variant-edited">Đã tinh chỉnh</span>}
               </div>
               <div className="variant-actions">
-                {isApplied && onEditMask && activeLayer?.type !== 'perspective' && (
-                  <button
-                    className="variant-action-btn"
-                    onClick={() => onEditMask(variant)}
-                    title="Edit visibility mask"
-                  >
-                    🖌 Edit Mask
-                  </button>
-                )}
+                <button
+                  className="variant-action-btn"
+                  onClick={() => setEditingVariantId(variant.id)}
+                  title="Xóa hoặc phục hồi vùng Result"
+                >
+                  ✎ Edit
+                </button>
                 <button
                   className="variant-action-btn variant-delete"
                   onClick={() => handleDelete(variant.id)}
@@ -89,6 +112,13 @@ export default function VariantGallery({ onEditMask }: Props) {
           );
         })}
       </div>
+      {editingVariant && (
+        <ResultMaskEditor
+          layerId={activeLayerId}
+          variant={editingVariant}
+          onClose={() => setEditingVariantId(null)}
+        />
+      )}
     </div>
   );
 }

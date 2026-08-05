@@ -43,10 +43,10 @@ export function permissionsFor(state: WorkflowState): WorkflowPermissions {
     camera: state === 'viewing',
     viewControls: state === 'viewing',
     rect: state === 'rect-select',
-    brush: state === 'canvas-edit' || state === 'ai-review',
-    lasso: state === 'canvas-edit' || state === 'ai-review',
-    eraser: state === 'canvas-edit' || state === 'ai-review',
-    undo: state === 'canvas-edit' || state === 'ai-review',
+    brush: false,
+    lasso: false,
+    eraser: false,
+    undo: false,
     ai: state === 'canvas-edit' || state === 'ai-review',
   };
 }

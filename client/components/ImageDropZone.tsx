@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 
 export function isSupportedImage(file: File): boolean {
   return /^image\/(jpeg|png|tiff|webp)$/.test(file.type)

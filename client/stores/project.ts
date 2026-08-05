@@ -5,7 +5,6 @@ import type {
   Horizon,
   Layer,
   LayerVariant,
-  MaskShape,
   SelectionDraft,
   ViewPose,
 } from '../../shared/types';
@@ -20,7 +19,7 @@ export interface RectSelect {
   nativeH: number;
 }
 
-export type ActiveTool = 'brush' | 'rect' | 'lasso' | 'eraser' | null;
+export type ActiveTool = 'rect' | null;
 export type ViewMode = 'viewer' | 'canvas';
 
 interface EditSnapshot {
@@ -44,14 +43,12 @@ export interface ProjectState {
   selectionDraft: SelectionDraft | null;
   editSnapshot: EditSnapshot | null;
   dirty: boolean;
+  hasUnsavedChanges: boolean;
   generatedVariants: GeneratedVariant[];
   selectedVariantId: string | null;
   selectedModel: AiModelOption | null;
   previewImage: string | null;
   previewLayer: Partial<Layer> | null;
-  getMaskBase64: (() => string | null) | null;
-  getMaskShapes: (() => MaskShape[]) | null;
-  maskDirty: boolean;
 
   openImage(path: string, width: number, height: number): void;
   updateViewPose(pose: Partial<ViewPose>): void;
@@ -66,20 +63,19 @@ export interface ProjectState {
   setViewMode(mode: ViewMode): void;
   setHorizon(horizon: Partial<Horizon>): void;
   setPreview(imageBase64: string | null, layer?: Partial<Layer>): void;
-  setGetMaskBase64(fn: (() => string | null) | null): void;
-  setGetMaskShapes(fn: (() => MaskShape[]) | null): void;
-  setLayerMask(id: string, patch: Partial<Pick<Layer, 'maskData' | 'maskForAi'>>): Promise<void>;
   setSelectionDraft(selection: SelectionDraft | null): void;
   markDirty(): void;
+  markProjectSaved(): void;
   setSelectedModel(model: AiModelOption | null): void;
   addGeneratedVariant(variant: GeneratedVariant): void;
   selectVariant(id: string | null): void;
   clearVariants(): void;
   // Variant management (v4)
   addVariantToLayer(layerId: string, variant: LayerVariant): void;
-  toggleVariant(layerId: string, variantId: string): void;
-  removeVariantFromLayer(layerId: string, variantId: string): void;
+  selectVariantForEditing(layerId: string, variantId: string): void;
+  selectOriginalVariant(layerId: string): void;
   updateVariantMask(layerId: string, variantId: string, mask: LayerVariant['visibilityMask']): void;
+  removeVariantFromLayer(layerId: string, variantId: string): void;
   leaveCanvas(choice: 'save' | 'discard'): void;
   addLayer(layer: Layer): void;
   updateLayer(id: string, patch: Partial<Layer>): void;
@@ -108,14 +104,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   selectionDraft: null,
   editSnapshot: null,
   dirty: false,
+  hasUnsavedChanges: false,
   generatedVariants: [],
   selectedVariantId: null,
   selectedModel: null,
   previewImage: null,
   previewLayer: null,
-  getMaskBase64: null,
-  getMaskShapes: null,
-  maskDirty: false,
 
   openImage: (imagePath, imageWidth, imageHeight) => set({
     imagePath,
@@ -128,9 +122,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     activeTool: null,
     selectionDraft: null,
     generatedVariants: [],
+    hasUnsavedChanges: true,
   }),
   updateViewPose: (pose) => set((state) => state.workflow === 'viewing'
-    ? { viewPose: { ...state.viewPose, ...pose }, horizon: { ...state.horizon, ...pose } }
+    ? { viewPose: { ...state.viewPose, ...pose }, horizon: { ...state.horizon, ...pose }, hasUnsavedChanges: true }
     : {}),
   enterRectSelect: (sourceView) => set((state) => ({
     workflow: 'rect-select',
@@ -152,7 +147,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ? { x: selection.tileCoords.x, y: selection.tileCoords.y, w: perspWidth, h: perspHeight }
         : { x: 0, y: 0, w: perspWidth, h: perspHeight },
       maskData: [],
-      maskForAi: true,
       prompt: selection.prompt,
       resultImageId,
       status: 'draft',
@@ -164,22 +158,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       activeLayerId: layerId,
       workflow: 'canvas-edit',
       selectionDraft: selection,
-      activeTool: 'brush',
+      activeTool: null,
       editSnapshot: { layer: null, selection },
       dirty: false,
+      hasUnsavedChanges: true,
     };
   }),
   openLayerEditor: (id) => set((state) => {
+    if (['canvas-edit', 'generating', 'ai-review'].includes(state.workflow)) return {};
     const layer = state.layers.find((item) => item.id === id);
     if (!layer) return {};
     return {
       workflow: 'canvas-edit',
       activeLayerId: id,
-      activeTool: 'brush',
+      activeTool: null,
       selectionDraft: layer.selection ?? null,
       editSnapshot: { layer: structuredClone(layer), selection: layer.selection ?? null },
       dirty: false,
-      maskDirty: false,
       generatedVariants: [],
       selectedVariantId: null,
     };
@@ -192,23 +187,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setViewMode: (viewMode) => set({ viewMode }),
   setHorizon: (horizon) => get().updateViewPose(horizon),
   setPreview: (previewImage, previewLayer) => set({ previewImage, previewLayer: previewLayer ?? null }),
-  setGetMaskBase64: (getMaskBase64) => set({ getMaskBase64 }),
-  setGetMaskShapes: (getMaskShapes) => set({ getMaskShapes }),
-  setLayerMask: async (id, patch) => {
-    const { layers } = get();
-    const layer = layers.find((l) => l.id === id);
-    if (!layer) return;
-    const next = { ...layer, ...patch };
-    set({ layers: layers.map((l) => l.id === id ? next : l), dirty: true, maskDirty: true });
-    // Reprojection no longer happens here. User must click "Apply Mask" or "Apply AI".
-  },
-  setSelectionDraft: (selectionDraft) => set({ selectionDraft, dirty: true }),
-  markDirty: () => set({ dirty: true }),
+  setSelectionDraft: (selectionDraft) => set({ selectionDraft, dirty: true, hasUnsavedChanges: true }),
+  markDirty: () => set({ dirty: true, hasUnsavedChanges: true }),
+  markProjectSaved: () => set({ hasUnsavedChanges: false }),
   setSelectedModel: (selectedModel) => set({ selectedModel }),
   addGeneratedVariant: (variant) => set((state) => ({
     workflow: 'ai-review',
     generatedVariants: [...state.generatedVariants, variant],
     selectedVariantId: variant.id,
+    hasUnsavedChanges: true,
   })),
   selectVariant: (selectedVariantId) => set({ selectedVariantId }),
   clearVariants: () => set({ generatedVariants: [], selectedVariantId: null, previewImage: null }),
@@ -218,16 +205,56 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ? { ...layer, variants: [...(layer.variants ?? []), variant] }
         : layer
     ),
+    hasUnsavedChanges: true,
   })),
-  toggleVariant: (layerId, variantId) => set((state) => ({
-    layers: state.layers.map((layer) => {
-      if (layer.id !== layerId) return layer;
-      const variants = (layer.variants ?? []).map((v) => ({
-        ...v,
-        applied: v.id === variantId ? !v.applied : false,
-      }));
-      return { ...layer, variants };
-    }),
+  selectVariantForEditing: (layerId, variantId) => set((state) => ({
+    layers: state.layers.map((layer) => layer.id === layerId
+      ? {
+        ...layer,
+        // A layer-level panorama cache must always belong to the variant that
+        // is currently selected. Never keep the previously selected cache.
+        equirectImageId: (() => {
+          const variants = layer.variants ?? [];
+          const deselect = variants.some((variant) => variant.id === variantId && variant.applied);
+          return deselect
+            ? undefined
+            : variants.find((variant) => variant.id === variantId)?.equirectImageId;
+        })(),
+        variants: (() => {
+          const variants = layer.variants ?? [];
+          const deselect = variants.some((variant) => variant.id === variantId && variant.applied);
+          return variants.map((variant) => ({
+            ...variant,
+            applied: deselect ? false : variant.id === variantId,
+          }));
+        })(),
+      }
+      : layer),
+    selectedVariantId: null,
+    hasUnsavedChanges: true,
+  })),
+  selectOriginalVariant: (layerId) => set((state) => ({
+    layers: state.layers.map((layer) => layer.id === layerId
+      ? {
+        ...layer,
+        equirectImageId: undefined,
+        variants: (layer.variants ?? []).map((variant) => ({ ...variant, applied: false })),
+      }
+      : layer),
+    selectedVariantId: null,
+    hasUnsavedChanges: true,
+  })),
+  updateVariantMask: (layerId, variantId, mask) => set((state) => ({
+    layers: state.layers.map((layer) => layer.id === layerId
+      ? {
+        ...layer,
+        equirectImageId: undefined,
+        variants: (layer.variants ?? []).map((variant) => variant.id === variantId
+          ? { ...variant, visibilityMask: mask, equirectImageId: undefined }
+          : variant),
+      }
+      : layer),
+    hasUnsavedChanges: true,
   })),
   removeVariantFromLayer: (layerId, variantId) => set((state) => ({
     layers: state.layers.map((layer) =>
@@ -235,15 +262,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ? { ...layer, variants: (layer.variants ?? []).filter((v) => v.id !== variantId) }
         : layer
     ),
-  })),
-  updateVariantMask: (layerId, variantId, mask) => set((state) => ({
-    layers: state.layers.map((layer) => {
-      if (layer.id !== layerId) return layer;
-      const variants = (layer.variants ?? []).map((v) =>
-        v.id === variantId ? { ...v, visibilityMask: mask } : v
-      );
-      return { ...layer, variants };
-    }),
+    hasUnsavedChanges: true,
   })),
   leaveCanvas: (choice) => set((state) => {
     let layers = state.layers;
@@ -257,14 +276,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // Update existing layer (created on Apply Rect) with latest selection state
       const draft = state.selectionDraft;
       if (draft) {
-        const shapes = get().getMaskShapes?.() ?? [];
         layers = layers.map((layer): Layer => layer.id === state.activeLayerId
           ? {
             ...layer,
             prompt: draft.prompt,
             selection: draft,
-            maskData: shapes,
-            maskForAi: layer.maskForAi ?? true,
             status: 'committed' as const,
           }
           : layer);
@@ -279,7 +295,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       viewLock: null,
       editSnapshot: null,
       dirty: false,
-      maskDirty: false,
       generatedVariants: [],
       selectedVariantId: null,
       previewImage: null,
@@ -287,13 +302,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   }),
   addLayer: (layer) => set((state) => ({
     layers: [...state.layers, { ...layer, visible: layer.visible ?? true }],
+    hasUnsavedChanges: true,
   })),
   updateLayer: (id, patch) => set((state) => ({
     layers: state.layers.map((layer) => layer.id === id ? { ...layer, ...patch } : layer),
+    hasUnsavedChanges: true,
   })),
   removeLayer: (id) => set((state) => ({
     layers: state.layers.filter((layer) => layer.id !== id),
     activeLayerId: state.activeLayerId === id ? null : state.activeLayerId,
+    hasUnsavedChanges: true,
   })),
   // Note: variant cache files are NOT deleted on removeLayer to avoid
   // accidental data loss. Cache dir is cleaned on reset.
@@ -301,6 +319,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     layers: state.layers.map((layer) => layer.id === id
       ? { ...layer, visible: layer.visible === false }
       : layer),
+    hasUnsavedChanges: true,
   })),
   reorderLayer: (id, newOrder) => set((state) => {
     const target = state.layers.find((layer) => layer.id === id);
@@ -317,6 +336,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         }
         return layer;
       }),
+      hasUnsavedChanges: true,
     };
   }),
   reset: () => set({
@@ -335,12 +355,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     selectionDraft: null,
     editSnapshot: null,
     dirty: false,
-    maskDirty: false,
+    hasUnsavedChanges: false,
     generatedVariants: [],
     selectedVariantId: null,
     previewImage: null,
     previewLayer: null,
-    getMaskBase64: null,
-    getMaskShapes: null,
   }),
 }));

@@ -103,7 +103,9 @@ export interface LayerVariant {
   visibilityMask?: {
     base64Mask: string;          // base64 PNG mask (white=visible, black=hidden)
     brushSize: number;           // px
-    brushSoftness: number;       // 0-100%
+    brushSoftness: number;       // legacy field; mirrors 100 - hardness
+    brushOpacity?: number;       // 0-100%
+    brushHardness?: number;      // 0-100%
   };
   /** Kích thước thực tế của ảnh kết quả (pixel) */
   width: number;
@@ -124,6 +126,8 @@ export interface SelectionDraft {
 
 export interface PerspectiveRenderRequest {
   imagePath: string;
+  /** Committed visible edits that must be baked into the source for a new layer. */
+  layers?: Layer[];
   viewPose: ViewPose;
   viewport: { width: number; height: number };
   rect: { x: number; y: number; width: number; height: number };
@@ -143,6 +147,7 @@ export interface ReprojectRequest {
   imagePath: string;
   maskEnabled?: boolean;
   maskData?: MaskShape[];
+  visibilityMask?: LayerVariant['visibilityMask'];
 }
 
 export interface ReprojectResponse {
@@ -170,7 +175,7 @@ export interface GeneratedVariant {
 export interface AiModelOption {
   id: string;
   displayName: string;
-  provider: 'local' | 'fal';
+  provider: 'fal';
   capabilities: Array<'inpainting' | 'image-edit'>;
   enabled: boolean;
   disabledReason?: string;
@@ -184,11 +189,11 @@ export interface AiModelOption {
 
 export interface ModelCatalogResponse {
   groups: Array<{
-    provider: 'local' | 'fal';
+    provider: 'fal';
     label: string;
     models: AiModelOption[];
   }>;
-  errors?: Partial<Record<'local' | 'fal', string>>;
+  errors?: Partial<Record<'fal', string>>;
 }
 
 export interface MaskShape {
@@ -205,7 +210,7 @@ export interface MaskShape {
 // ===== AI =====
 
 export interface AiEditRequest {
-  provider: 'local' | 'fal';
+  provider: 'fal';
   modelId: string;
   base64Image: string;
   base64Mask: string;

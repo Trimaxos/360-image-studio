@@ -1,28 +1,45 @@
 import { config } from '../config';
+import sharp from 'sharp';
 
-export interface AiProvider {
-  name: 'local' | 'fal';
-  modelId: string;
-  edit(image: string, mask: string, prompt: string): Promise<{ base64Result: string; model: string }>;
+const PRESERVATION_RULES = [
+  'Make one minimal, localized edit to the provided image.',
+  'Preserve the exact camera position, framing, crop, aspect ratio, perspective, geometry, scale, and composition.',
+  'Keep every existing building, road, curb, vehicle, tree, object, sign, texture, shadow, lighting condition, color, and detail unchanged.',
+  'Do not zoom, crop, rotate, reframe, recolor, relight, beautify, restyle, move, remove, replace, duplicate, or add anything unless the edit request explicitly requires it.',
+  'Change only the minimum pixels necessary to satisfy the edit request and leave all other pixels visually identical to the input image.',
+].join(' ');
+
+const PRESERVATION_NEGATIVE_PROMPT = [
+  'zoom, crop, reframing, camera movement, perspective change, geometry change,',
+  'color shift, relighting, style change, extra objects, extra vehicles, changed road,',
+  'changed buildings, changed vegetation, duplicated objects, removed objects',
+].join(' ');
+
+export function buildPreservationPrompt(editRequest: string): string {
+  return `${PRESERVATION_RULES} EDIT REQUEST: ${editRequest.trim()}`;
 }
 
-class LocalProvider implements AiProvider {
-  name = 'local' as const;
-  constructor(public modelId: string) {}
-  async edit(base64Image: string, base64Mask: string, prompt: string) {
-    const response = await fetch(`${config.localAiBaseUrl}/inpaint`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ base64Image, base64Mask, prompt }),
-      signal: AbortSignal.timeout(900_000),
-    });
-    if (!response.ok) {
-      const detail = await response.text();
-      throw new Error(`Local AI error: HTTP ${response.status}${detail ? ` ${detail}` : ''}`);
-    }
-    const data = await response.json() as any;
-    return { base64Result: data.base64Result, model: this.modelId };
+export async function normalizeResultToSourceDimensions(
+  sourceImage: Buffer,
+  resultImage: Buffer,
+): Promise<Buffer> {
+  const sourceMetadata = await sharp(sourceImage).metadata();
+  if (!sourceMetadata.width || !sourceMetadata.height) {
+    throw new Error('Không đọc được kích thước ảnh nguồn.');
   }
+  return sharp(resultImage)
+    .resize(sourceMetadata.width, sourceMetadata.height, {
+      fit: 'fill',
+      kernel: sharp.kernel.lanczos3,
+    })
+    .png()
+    .toBuffer();
+}
+
+export interface AiProvider {
+  name: 'fal';
+  modelId: string;
+  edit(image: string, mask: string, prompt: string): Promise<{ base64Result: string; model: string }>;
 }
 
 class FalProvider implements AiProvider {
@@ -39,7 +56,7 @@ class FalProvider implements AiProvider {
     const props = this.inputProperties;
 
     // Build request body dynamically based on model's input schema
-    const body: Record<string, any> = { prompt };
+    const body: Record<string, any> = { prompt: buildPreservationPrompt(prompt) };
 
     // Image input: support both image_url (single) and image_urls (array)
     if (props.includes('image_urls')) {
@@ -58,6 +75,13 @@ class FalProvider implements AiProvider {
       body.mask_image_url = maskDataUri;
     }
     // If model doesn't support mask, we don't send it — the model does prompt-only editing
+
+    if (props.includes('negative_prompt')) {
+      body.negative_prompt = PRESERVATION_NEGATIVE_PROMPT;
+    }
+    if (props.includes('strength')) {
+      body.strength = 0.25;
+    }
 
     // Sync mode for faster response
     if (props.includes('sync_mode')) {
@@ -79,27 +103,28 @@ class FalProvider implements AiProvider {
     if (!resultUrl) throw new Error('fal.ai không trả về ảnh');
     const imageResponse = await fetch(resultUrl);
     if (!imageResponse.ok) throw new Error(`Không tải được kết quả fal.ai: HTTP ${imageResponse.status}`);
+    const normalizedResult = await normalizeResultToSourceDimensions(
+      Buffer.from(base64Image, 'base64'),
+      Buffer.from(await imageResponse.arrayBuffer()),
+    );
     return {
-      base64Result: Buffer.from(await imageResponse.arrayBuffer()).toString('base64'),
+      base64Result: normalizedResult.toString('base64'),
       model: this.modelId,
     };
   }
 }
 
 export function getProviderFor(
-  provider: 'local' | 'fal',
+  provider: string,
   modelId: string,
   inputProperties?: string[],
 ): AiProvider {
-  if (provider === 'fal') return new FalProvider(modelId, inputProperties);
-  const model = config.localModels.find((item) => item.id === modelId);
-  if (!model) throw new Error(`Local model not configured: ${modelId}`);
-  if (!model.enabled) throw new Error(`Local model disabled: ${modelId}`);
-  return new LocalProvider(model.id);
+  if (provider !== 'fal') throw new Error(`Unsupported AI provider: ${provider}`);
+  return new FalProvider(modelId, inputProperties);
 }
 
 export async function aiEdit(
-  providerName: 'local' | 'fal',
+  providerName: 'fal',
   modelId: string,
   base64Image: string,
   base64Mask: string,

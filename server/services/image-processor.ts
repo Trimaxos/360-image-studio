@@ -136,7 +136,26 @@ export async function exportImage(
             } catch { /* fall through */ }
           }
           const { reprojectToEquirectangular } = await import('./perspective-projector');
-          const reprojected = await reprojectToEquirectangular(variantFile, layer, panoramaSize);
+          let reprojectionSource = variantFile;
+          let maskedTempPath: string | undefined;
+          if (appliedVariant.visibilityMask?.base64Mask) {
+            const maskedResult = await applyVisibilityMask(
+              variantFile,
+              appliedVariant.visibilityMask.base64Mask,
+              0,
+              appliedVariant.width,
+              appliedVariant.height,
+            );
+            maskedTempPath = path.join(CACHE_DIR, `masked-export-${layer.id}-${appliedVariant.id}.png`);
+            await fs.writeFile(maskedTempPath, maskedResult);
+            reprojectionSource = maskedTempPath;
+          }
+          let reprojected: Buffer;
+          try {
+            reprojected = await reprojectToEquirectangular(reprojectionSource, layer, panoramaSize);
+          } finally {
+            if (maskedTempPath) await fs.unlink(maskedTempPath).catch(() => undefined);
+          }
           composites.push({ input: reprojected, top: 0, left: 0, blend: 'over' });
           continue;
         }
@@ -152,7 +171,7 @@ export async function exportImage(
           const maskedResult = await applyVisibilityMask(
             variantFile,
             appliedVariant.visibilityMask.base64Mask,
-            appliedVariant.visibilityMask.brushSoftness,
+            0,
             appliedVariant.width,
             appliedVariant.height,
           );
@@ -266,13 +285,23 @@ export async function applyVisibilityMask(
   // Combine: result RGB + min(maskLuma, resultAlpha) as final alpha.
   // The mask ANDs with the result's natural alpha: a region is visible only where
   // the mask is bright AND the result itself has pixels (preserves PNG transparency).
+  // Also force a short feather at the outer image boundary. Perspective results are
+  // rectangular; even a tiny residual alpha on that boundary becomes a visible seam
+  // after reprojection onto a panorama.
   const pixelCount = width * height;
   const rgba = Buffer.alloc(pixelCount * 4);
+  const edgeFeather = Math.max(8, Math.min(48, Math.round(Math.min(width, height) * 0.015)));
   for (let i = 0; i < pixelCount; i++) {
+    const x = i % width;
+    const y = Math.floor(i / width);
+    const edgeDistance = Math.min(x, y, width - 1 - x, height - 1 - y);
+    const edgeProgress = Math.max(0, Math.min(1, edgeDistance / edgeFeather));
+    // Smoothstep avoids introducing a second perceptible line at the end of the fade.
+    const edgeAlpha = edgeProgress * edgeProgress * (3 - 2 * edgeProgress);
     rgba[i * 4]     = resultRgb[i * 3];
     rgba[i * 4 + 1] = resultRgb[i * 3 + 1];
     rgba[i * 4 + 2] = resultRgb[i * 3 + 2];
-    rgba[i * 4 + 3] = Math.min(maskLuma[i], resultAlpha[i]);
+    rgba[i * 4 + 3] = Math.round(Math.min(maskLuma[i], resultAlpha[i]) * edgeAlpha);
   }
 
   return sharp(rgba, { raw: { width, height, channels: 4 } }).png().toBuffer();

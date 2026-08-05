@@ -11,14 +11,7 @@
     "dev": "vite",
     "build": "vite build",
     "server": "tsx server/index.ts",
-    "start": "npm run build && npm run server",
-    "local-ai:build": "bash scripts/local-ai-build.sh",
-    "local-ai:prepare": "bash scripts/local-ai-prepare-assets.sh",
-    "local-ai:bake": "bash scripts/local-ai-bake-assets.sh",
-    "local-ai:run": "bash scripts/local-ai-run.sh",
-    "local-ai:stop": "bash scripts/local-ai-stop.sh",
-    "local-ai:save": "bash scripts/local-ai-save.sh",
-    "local-ai:load": "bash scripts/local-ai-load.sh"
+    "start": "npm run build && npm run server"
   },
   "repository": {
     "type": "git",
