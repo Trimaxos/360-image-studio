@@ -1098,6 +1098,8 @@ html, body, #root {
   backdrop-filter: blur(4px);
 }
 .result-mask-modal {
+  display: flex;
+  flex-direction: column;
   width: min(1100px, 96vw);
   max-height: 94vh;
   overflow: auto;
@@ -1106,6 +1108,15 @@ html, body, #root {
   background: #f8fafc;
   color: #172033;
   box-shadow: 0 24px 80px rgba(0, 0, 0, .5);
+}
+.result-mask-backdrop.fullscreen {
+  padding: 0;
+}
+.result-mask-modal.fullscreen {
+  width: 100vw;
+  height: 100vh;
+  max-height: 100vh;
+  border-radius: 0;
 }
 .result-mask-header {
   display: flex;
@@ -1312,9 +1323,11 @@ html, body, #root {
   position: relative;
   display: grid;
   place-items: center;
+  flex: 1 1 auto;
   min-height: 280px;
   margin: 0 22px;
   overflow: auto;
+  scrollbar-width: none; /* Firefox — pan is via Space/middle-click drag, not the scrollbar */
   border: 1px solid #dbe1ea;
   border-radius: 12px;
   background-color: #fff;
@@ -1325,6 +1338,9 @@ html, body, #root {
     linear-gradient(-45deg, transparent 75%, #e5e7eb 75%);
   background-position: 0 0, 0 10px, 10px -10px, -10px 0;
   background-size: 20px 20px;
+}
+.result-mask-workspace::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/Edge */
 }
 .result-mask-canvas-shell {
   position: relative;

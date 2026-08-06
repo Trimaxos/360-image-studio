@@ -185,6 +185,12 @@ export interface AiModelOption {
   inputProperties?: string[];
   /** Whether the model supports mask input for inpainting */
   hasMask?: boolean;
+  /** Whether the model's schema requires a mask input (vs. accepting it optionally) */
+  maskRequired?: boolean;
+  /** Real fal.ai endpoint to call, when it differs from `id` (e.g. multiple quality-tier options sharing one endpoint) */
+  endpointId?: string;
+  /** Extra body params merged into the fal.ai request (e.g. { quality: 'low' }) */
+  extraParams?: Record<string, string | number | boolean>;
 }
 
 export interface ModelCatalogResponse {

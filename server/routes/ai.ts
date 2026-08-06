@@ -32,7 +32,10 @@ aiRouter.post('/edit', async (req, res) => {
       return res.status(400).json({ error: 'provider, modelId, base64Image, base64Mask, and prompt are required' });
     }
     const modelInfo = await getModelInfo(modelId);
-    const result = await aiEdit(provider, modelId, base64Image, base64Mask, prompt, modelInfo?.inputProperties);
+    const result = await aiEdit(
+      provider, modelId, base64Image, base64Mask, prompt,
+      modelInfo?.inputProperties, modelInfo?.endpointId, modelInfo?.extraParams, modelInfo?.maskRequired,
+    );
     res.json(result as AiEditResponse);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
