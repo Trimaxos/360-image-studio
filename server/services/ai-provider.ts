@@ -47,6 +47,9 @@ class FalProvider implements AiProvider {
   constructor(
     public modelId: string,
     private inputProperties: string[] = [],
+    private endpointId?: string,
+    private extraParams?: Record<string, string | number | boolean>,
+    private maskRequired?: boolean,
   ) {}
   async edit(base64Image: string, base64Mask: string, prompt: string) {
     if (!config.falAiKey) throw new Error('FAL_AI_KEY chưa được cấu hình');
@@ -68,13 +71,18 @@ class FalProvider implements AiProvider {
       body.image_url = imageDataUri;
     }
 
-    // Mask input: support mask_url, mask_image_url, or skip if not supported
-    if (props.includes('mask_url')) {
-      body.mask_url = maskDataUri;
-    } else if (props.includes('mask_image_url')) {
-      body.mask_image_url = maskDataUri;
+    // Mask input: only send when the model's schema requires it. There is no mask-drawing
+    // UI in this app — the mask we'd send is always solid white ("edit everything"), and
+    // some models (e.g. gpt-image-2) treat a fully-white mask as "discard the reference
+    // image and regenerate from scratch" instead of "the whole crop is eligible for a
+    // prompt-guided edit". Omitting it when optional lets those models edit in place.
+    if (this.maskRequired) {
+      if (props.includes('mask_url')) {
+        body.mask_url = maskDataUri;
+      } else if (props.includes('mask_image_url')) {
+        body.mask_image_url = maskDataUri;
+      }
     }
-    // If model doesn't support mask, we don't send it — the model does prompt-only editing
 
     if (props.includes('negative_prompt')) {
       body.negative_prompt = PRESERVATION_NEGATIVE_PROMPT;
@@ -88,7 +96,9 @@ class FalProvider implements AiProvider {
       body.sync_mode = true;
     }
 
-    const response = await fetch(`https://fal.run/${this.modelId}`, {
+    if (this.extraParams) Object.assign(body, this.extraParams);
+
+    const response = await fetch(`https://fal.run/${this.endpointId ?? this.modelId}`, {
       method: 'POST',
       headers: {
         Authorization: `Key ${config.falAiKey}`,
@@ -118,9 +128,12 @@ export function getProviderFor(
   provider: string,
   modelId: string,
   inputProperties?: string[],
+  endpointId?: string,
+  extraParams?: Record<string, string | number | boolean>,
+  maskRequired?: boolean,
 ): AiProvider {
   if (provider !== 'fal') throw new Error(`Unsupported AI provider: ${provider}`);
-  return new FalProvider(modelId, inputProperties);
+  return new FalProvider(modelId, inputProperties, endpointId, extraParams, maskRequired);
 }
 
 export async function aiEdit(
@@ -130,8 +143,11 @@ export async function aiEdit(
   base64Mask: string,
   prompt: string,
   inputProperties?: string[],
+  endpointId?: string,
+  extraParams?: Record<string, string | number | boolean>,
+  maskRequired?: boolean,
 ) {
-  const provider = getProviderFor(providerName, modelId, inputProperties);
+  const provider = getProviderFor(providerName, modelId, inputProperties, endpointId, extraParams, maskRequired);
   const result = await provider.edit(base64Image, base64Mask, prompt);
   return { ...result, provider: provider.name };
 }

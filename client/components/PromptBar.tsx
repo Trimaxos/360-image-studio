@@ -48,9 +48,11 @@ export default function PromptBar() {
       }
 
       // Mask drawing has been removed: AI always edits the full selected rectangle.
+      // Must match base64Image's real pixel size, not the on-screen selection rect —
+      // for '360' selections these differ (viewport px vs. rendered perspective px).
       const effectiveMask = await createWhiteMask(
-        selection.tileCoords.w,
-        selection.tileCoords.h,
+        activeLayer?.tileCoords.w ?? selection.tileCoords.w,
+        activeLayer?.tileCoords.h ?? selection.tileCoords.h,
       );
 
       const result = await api.ai.edit({

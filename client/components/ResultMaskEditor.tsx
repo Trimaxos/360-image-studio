@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { LayerVariant } from '../../shared/types';
 import { api } from '../lib/api';
 import { useProjectStore } from '../stores/project';
@@ -24,6 +24,10 @@ export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
   const [hardness, setHardness] = useState(variant.visibilityMask?.brushHardness ?? 80);
   const [ready, setReady] = useState(false);
   const [showOriginal, setShowOriginal] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
+  const panRef = useRef<{ startX: number; startY: number; scrollLeft: number; scrollTop: number } | null>(null);
   const [zoom, setZoom] = useState(1);
   const [fittedSize, setFittedSize] = useState({ width: 0, height: 0 });
   const [, refreshHistory] = useState(0);
@@ -161,8 +165,11 @@ export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
     const workspace = workspaceRef.current;
     if (!ready || !canvas || !workspace) return;
     const measure = () => {
+      // workspace now has a real flex-computed box (see .result-mask-workspace
+      // flex: 1 1 auto), so its own clientWidth/clientHeight is the actual
+      // available space — this stays accurate in both normal and fullscreen mode.
       const availableWidth = Math.max(1, workspace.clientWidth);
-      const availableHeight = Math.max(280, window.innerHeight * .58);
+      const availableHeight = Math.max(1, workspace.clientHeight);
       const scale = Math.min(1, availableWidth / canvas.width, availableHeight / canvas.height);
       setFittedSize({ width: canvas.width * scale, height: canvas.height * scale });
     };
@@ -181,6 +188,27 @@ export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [redo, undo]);
+
+  // Hold Space to pan the zoomed view by dragging, instead of scrollbars.
+  useEffect(() => {
+    const isTyping = (target: EventTarget | null) =>
+      target instanceof HTMLElement && ['INPUT', 'TEXTAREA'].includes(target.tagName);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== 'Space' || isTyping(event.target)) return;
+      // Must preventDefault on every repeat too, not just the first keydown —
+      // otherwise the browser's native "Space = scroll page down" still fires
+      // on the auto-repeated keydowns while the key is held.
+      event.preventDefault();
+      if (!event.repeat) setSpaceHeld(true);
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.code !== 'Space') return;
+      setSpaceHeld(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
+  }, []);
 
   const point = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -218,6 +246,22 @@ export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
   };
   const startPaint = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (!ready || !maskRef.current) return;
+    // Middle-click, or holding Space while left-click-dragging, pans the
+    // zoomed view instead of painting — no need to reach for the scrollbars.
+    if (event.button === 1 || (event.button === 0 && spaceHeld)) {
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      panRef.current = {
+        startX: event.clientX,
+        startY: event.clientY,
+        scrollLeft: workspaceRef.current?.scrollLeft ?? 0,
+        scrollTop: workspaceRef.current?.scrollTop ?? 0,
+      };
+      setIsPanning(true);
+      setCursor(undefined);
+      return;
+    }
+    if (event.button !== 0) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     undoRef.current.push(maskRef.current.toDataURL());
     if (undoRef.current.length > 30) undoRef.current.shift();
@@ -225,6 +269,14 @@ export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
     const next = point(event); lastRef.current = next; paintTo(next); refreshHistory((value) => value + 1);
   };
   const movePaint = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (panRef.current) {
+      const workspace = workspaceRef.current;
+      if (workspace) {
+        workspace.scrollLeft = panRef.current.scrollLeft - (event.clientX - panRef.current.startX);
+        workspace.scrollTop = panRef.current.scrollTop - (event.clientY - panRef.current.startY);
+      }
+      return;
+    }
     const next = point(event);
     const workspaceBounds = workspaceRef.current?.getBoundingClientRect();
     // Keep the brush ring in workspace coordinates, including scroll offsets,
@@ -236,7 +288,7 @@ export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
     });
     if (drawingRef.current) paintTo(next);
   };
-  const stopPaint = () => { drawingRef.current = false; lastRef.current = undefined; };
+  const stopPaint = () => { drawingRef.current = false; lastRef.current = undefined; panRef.current = null; setIsPanning(false); };
   const resetMask = () => {
     const mask = maskRef.current; if (!mask) return;
     undoRef.current.push(mask.toDataURL()); redoRef.current = [];
@@ -252,22 +304,62 @@ export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
     onClose();
   };
 
-  const changeZoom = (next: number) => setZoom(Math.min(4, Math.max(.25, next)));
-  const handleZoomWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
-    if (!event.ctrlKey && !event.metaKey) return;
-    event.preventDefault();
-    changeZoom(zoom * (event.deltaY < 0 ? 1.15 : 1 / 1.15));
-  };
+  const clampZoom = (value: number) => Math.min(12, Math.max(.25, value));
+  const changeZoom = (next: number) => setZoom(clampZoom(next));
 
-  return <div className="result-mask-backdrop" role="dialog" aria-modal="true" aria-label="Chỉnh sửa vùng hiển thị">
-    <div className="result-mask-modal">
-      <header className="result-mask-header"><div><h2>Tinh chỉnh kết quả</h2><p>Xóa phần AI không cần thiết hoặc phục hồi lại bất cứ lúc nào.</p></div><div className="result-mask-header-actions"><button className={`compare ${showOriginal ? 'active' : ''}`} onClick={toggleOriginal}>◉ {showOriginal ? 'Ẩn ảnh gốc' : 'Hiện ảnh gốc'}</button><button className="primary" onClick={save}>✓ Áp dụng chỉnh sửa</button><button onClick={onClose} aria-label="Đóng">✕</button></div></header>
+  // Keeps the point under the cursor fixed on screen across a Ctrl+wheel zoom,
+  // instead of zooming from whatever corner the canvas happens to grow from.
+  const zoomAnchorRef = useRef<{ fx: number; fy: number; clientX: number; clientY: number } | null>(null);
+
+  // React attaches onWheel as a passive listener, so preventDefault() inside a
+  // JSX handler can't stop the browser's own Ctrl+wheel page zoom. A native
+  // listener with { passive: false } is required to intercept it.
+  useEffect(() => {
+    const workspace = workspaceRef.current;
+    if (!workspace) return;
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      const canvas = displayRef.current;
+      const rect = canvas?.getBoundingClientRect();
+      if (rect && rect.width > 0 && rect.height > 0) {
+        zoomAnchorRef.current = {
+          fx: (event.clientX - rect.left) / rect.width,
+          fy: (event.clientY - rect.top) / rect.height,
+          clientX: event.clientX,
+          clientY: event.clientY,
+        };
+      }
+      setZoom((current) => clampZoom(current * (event.deltaY < 0 ? 1.15 : 1 / 1.15)));
+    };
+    workspace.addEventListener('wheel', onWheel, { passive: false });
+    return () => workspace.removeEventListener('wheel', onWheel);
+  }, []);
+
+  // Runs after the canvas is resized for the new zoom level (but before paint)
+  // and scrolls the workspace so the anchored point stays under the cursor.
+  useLayoutEffect(() => {
+    const anchor = zoomAnchorRef.current;
+    if (!anchor) return;
+    zoomAnchorRef.current = null;
+    const canvas = displayRef.current, workspace = workspaceRef.current;
+    if (!canvas || !workspace) return;
+    const rect = canvas.getBoundingClientRect();
+    const currentClientX = rect.left + anchor.fx * rect.width;
+    const currentClientY = rect.top + anchor.fy * rect.height;
+    workspace.scrollLeft += currentClientX - anchor.clientX;
+    workspace.scrollTop += currentClientY - anchor.clientY;
+  }, [zoom]);
+
+  return <div className={`result-mask-backdrop ${fullscreen ? 'fullscreen' : ''}`} role="dialog" aria-modal="true" aria-label="Chỉnh sửa vùng hiển thị">
+    <div className={`result-mask-modal ${fullscreen ? 'fullscreen' : ''}`}>
+      <header className="result-mask-header"><div><h2>Tinh chỉnh kết quả</h2><p>Xóa phần AI không cần thiết hoặc phục hồi lại bất cứ lúc nào.</p></div><div className="result-mask-header-actions"><button className={`compare ${showOriginal ? 'active' : ''}`} onClick={toggleOriginal}>◉ {showOriginal ? 'Ẩn ảnh gốc' : 'Hiện ảnh gốc'}</button><button onClick={() => setFullscreen((value) => !value)} aria-label={fullscreen ? 'Thu nhỏ popup' : 'Phóng to popup'} title={fullscreen ? 'Thu nhỏ popup' : 'Phóng to popup toàn màn hình'}>{fullscreen ? '⤢' : '⛶'}</button><button className="primary" onClick={save}>✓ Áp dụng chỉnh sửa</button><button onClick={onClose} aria-label="Đóng">✕</button></div></header>
       <div className="result-mask-tools">
-        <div className="result-mask-mode"><button className={tool === 'erase' ? 'active erase' : ''} onClick={() => setTool('erase')}>⌫ Xóa</button><button className={tool === 'restore' ? 'active restore' : ''} onClick={() => setTool('restore')}>♻ Phục hồi</button><button onClick={resetMask}>Phục hồi toàn bộ</button><button disabled={!undoRef.current.length} onClick={undo} title="Undo (Ctrl+Z)">↶</button><button disabled={!redoRef.current.length} onClick={redo} title="Redo (Ctrl+Y)">↷</button><details className="result-mask-help-popover"><summary aria-label="Hướng dẫn sử dụng brush" title="Hướng dẫn sử dụng"><span>i</span></summary><div><strong>Hướng dẫn brush:</strong><ul><li><b>Xóa:</b> quét vùng muốn trong suốt</li><li><b>Phục hồi:</b> lấy lại pixel gốc</li><li><b>Độ cứng = 0:</b> viền mờ dần (feather)</li><li><b>Độ mờ &lt; 100%:</b> xóa/phục hồi bán phần</li><li>Ctrl+Z / Ctrl+Y để undo/redo</li></ul></div></details></div>
-        <div className="result-mask-sliders"><label>Kích thước <strong>{size}px</strong><input type="range" min="10" max="300" value={size} onChange={(event) => setSize(+event.target.value)} /></label><label>Độ mờ <strong>{opacity}%</strong><input type="range" min="5" max="100" value={opacity} onChange={(event) => setOpacity(+event.target.value)} /></label><label>Độ cứng <strong>{hardness}%</strong><input type="range" min="0" max="100" value={hardness} onChange={(event) => setHardness(+event.target.value)} /></label></div>
+        <div className="result-mask-mode"><button className={tool === 'erase' ? 'active erase' : ''} onClick={() => setTool('erase')}>⌫ Xóa</button><button className={tool === 'restore' ? 'active restore' : ''} onClick={() => setTool('restore')}>♻ Phục hồi</button><button onClick={resetMask}>Phục hồi toàn bộ</button><button disabled={!undoRef.current.length} onClick={undo} title="Undo (Ctrl+Z)">↶</button><button disabled={!redoRef.current.length} onClick={redo} title="Redo (Ctrl+Y)">↷</button><details className="result-mask-help-popover"><summary aria-label="Hướng dẫn sử dụng brush" title="Hướng dẫn sử dụng"><span>i</span></summary><div><strong>Hướng dẫn brush:</strong><ul><li><b>Xóa:</b> quét vùng muốn trong suốt</li><li><b>Phục hồi:</b> lấy lại pixel gốc</li><li><b>Độ cứng = 0:</b> viền mờ dần (feather)</li><li><b>Độ mờ &lt; 100%:</b> xóa/phục hồi bán phần</li><li>Ctrl+Z / Ctrl+Y để undo/redo</li><li>Giữ <b>Space</b> hoặc chuột giữa để kéo di chuyển ảnh khi đã zoom</li></ul></div></details></div>
+        <div className="result-mask-sliders"><label>Kích thước <strong>{size}px</strong><input type="range" min="1" max="300" value={size} onChange={(event) => setSize(+event.target.value)} /></label><label>Độ mờ <strong>{opacity}%</strong><input type="range" min="5" max="100" value={opacity} onChange={(event) => setOpacity(+event.target.value)} /></label><label>Độ cứng <strong>{hardness}%</strong><input type="range" min="0" max="100" value={hardness} onChange={(event) => setHardness(+event.target.value)} /></label></div>
       </div>
-      <div className="result-mask-zoom"><button onClick={() => changeZoom(zoom / 1.25)} aria-label="Thu nhỏ">−</button><strong>{Math.round(zoom * 100)}%</strong><button onClick={() => changeZoom(zoom * 1.25)} aria-label="Phóng to">+</button><button onClick={() => setZoom(1)}>Vừa khung</button><span>Ctrl + con lăn để zoom</span></div>
-      <div ref={workspaceRef} className="result-mask-workspace" onWheel={handleZoomWheel} onMouseLeave={() => setCursor(undefined)}><div className="result-mask-canvas-shell" style={{ width: fittedSize.width * zoom || undefined, height: fittedSize.height * zoom || undefined }}><canvas ref={displayRef} style={fittedSize.width ? { width: fittedSize.width * zoom, height: fittedSize.height * zoom } : undefined} onPointerDown={startPaint} onPointerMove={movePaint} onPointerUp={stopPaint} onPointerCancel={stopPaint} /></div>{!ready && <span className="result-mask-loading">Đang tải ảnh…</span>}{cursor && <span className="result-mask-cursor" style={{ left: cursor.x, top: cursor.y, width: size / cursor.scale, height: size / cursor.scale }} />}</div>
+      <div className="result-mask-zoom"><button onClick={() => changeZoom(zoom / 1.25)} aria-label="Thu nhỏ">−</button><strong>{Math.round(zoom * 100)}%</strong><button onClick={() => changeZoom(zoom * 1.25)} aria-label="Phóng to">+</button><button onClick={() => setZoom(1)}>Vừa khung</button><span>Ctrl + con lăn để zoom · Giữ Space hoặc chuột giữa để kéo di chuyển</span></div>
+      <div ref={workspaceRef} className="result-mask-workspace" onMouseLeave={() => setCursor(undefined)}><div className="result-mask-canvas-shell" style={{ width: fittedSize.width * zoom || undefined, height: fittedSize.height * zoom || undefined }}><canvas ref={displayRef} style={{ cursor: isPanning ? 'grabbing' : spaceHeld ? 'grab' : 'none', ...(fittedSize.width ? { width: fittedSize.width * zoom, height: fittedSize.height * zoom } : undefined) }} onPointerDown={startPaint} onPointerMove={movePaint} onPointerUp={stopPaint} onPointerCancel={stopPaint} /></div>{!ready && <span className="result-mask-loading">Đang tải ảnh…</span>}{cursor && !isPanning && !spaceHeld && <span className="result-mask-cursor" style={{ left: cursor.x, top: cursor.y, width: size / cursor.scale, height: size / cursor.scale }} />}</div>
     </div>
   </div>;
 }
