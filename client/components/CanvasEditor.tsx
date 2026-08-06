@@ -225,6 +225,32 @@ export default function CanvasEditor() {
     }
   };
 
+  // Bakes a colored marker (from RegionSelectOverlay's "Áp dụng") into a new
+  // result, so the user can prompt normally against a visible marker on the
+  // image itself instead of relying on a mask or a guessed text location.
+  const applyRegionColors = async (bakedBase64: string) => {
+    if (!activeLayer) return;
+    setExchangeMessage('');
+    try {
+      const { resultImageId } = await api.image.saveResultCache(bakedBase64);
+      const variant: LayerVariant = {
+        id: crypto.randomUUID(),
+        resultImageId,
+        source: 'imported',
+        applied: false,
+        width: activeLayer.tileCoords.w,
+        height: activeLayer.tileCoords.h,
+        createdAt: Date.now(),
+      };
+      state.addVariantToLayer(activeLayer.id, variant);
+      state.selectVariantForEditing(activeLayer.id, variant.id);
+      state.setRegionEdit(null);
+      setSelectingRegion(false);
+    } catch (reason) {
+      setExchangeMessage(reason instanceof Error ? reason.message : 'Không thể áp dụng vùng đã tô.');
+    }
+  };
+
   return (
     <div className="canvas-editor">
       <input
@@ -285,7 +311,12 @@ export default function CanvasEditor() {
           <RegionSelectOverlay
             sourceUrl={sourceUrl}
             onCancel={() => setSelectingRegion(false)}
-            onSelect={(region) => { state.setRegionEdit(region); setSelectingRegion(false); }}
+            // Fires as soon as a shape is drawn — just registers the mask,
+            // does NOT close the panel. The panel stays open so the user can
+            // still pick fill/stroke colors and Áp dụng, or press Hủy to
+            // close while keeping the mask already registered.
+            onSelect={(region) => state.setRegionEdit(region)}
+            onApply={(bakedBase64) => void applyRegionColors(bakedBase64)}
           />
         )}
       </div>
@@ -296,6 +327,7 @@ export default function CanvasEditor() {
           onSave={() => { void leaveForView('save'); }}
           onDiscard={() => state.leaveCanvas('discard')}
           onCancel={() => setBackOpen(false)}
+          saving={returningToView}
         />
       )}
     </div>
