@@ -1,5 +1,4 @@
-import React, { useEffect, useState } from 'react';
-import type { Layer, MaskShape } from '../../shared/types';
+import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { blobToBase64, createWhiteMask } from '../lib/mask-utils';
 import { permissionsFor } from '../stores/workflow';
@@ -12,7 +11,6 @@ export default function PromptBar() {
   const [prompt, setPrompt] = useState('');
   const [error, setError] = useState('');
   const generating = state.workflow === 'generating';
-  const selectedVariant = state.generatedVariants.find((item) => item.id === state.selectedVariantId);
   const activeLayer = state.layers.find((l) => l.id === state.activeLayerId);
 
   useEffect(() => {
@@ -22,13 +20,8 @@ export default function PromptBar() {
   const generate = async () => {
     const selection = state.selectionDraft;
     const model = state.selectedModel;
-    const mask = state.getMaskBase64?.();
+    const layerId = state.activeLayerId;
     if (!selection || !state.imagePath || !model || !prompt.trim()) return;
-
-    const useMaskForAi = activeLayer?.maskForAi !== false; // default true
-
-    // When maskForAi is on, mask is required. When off, we generate a full-white mask.
-    if (useMaskForAi && !mask) return;
 
     setError('');
     state.setWorkflow('generating');
@@ -36,9 +29,11 @@ export default function PromptBar() {
       const translated = (await api.ai.translate(prompt.trim())).translated;
       let base64Image: string | undefined;
 
-      // Try loading from active layer's cache first (perspective layers)
-      if (activeLayer?.resultImageId) {
-        const cacheUrl = api.image.cacheUrl(activeLayer.resultImageId);
+      // Continue from the selected result, or from the untouched original tile.
+      const selectedVariant = activeLayer?.variants?.find((variant) => variant.applied);
+      const sourceResultImageId = selectedVariant?.resultImageId ?? activeLayer?.resultImageId;
+      if (sourceResultImageId) {
+        const cacheUrl = api.image.cacheUrl(sourceResultImageId);
         const response = await fetch(cacheUrl);
         if (!response.ok) throw new Error('Không đọc được ảnh canvas từ cache.');
         base64Image = await blobToBase64(await response.blob());
@@ -52,8 +47,8 @@ export default function PromptBar() {
         base64Image = await blobToBase64(await imageResponse.blob());
       }
 
-      // When maskForAi is off, create a full-white mask (AI regenerates entire tile)
-      const effectiveMask = useMaskForAi ? mask! : await createWhiteMask(
+      // Mask drawing has been removed: AI always edits the full selected rectangle.
+      const effectiveMask = await createWhiteMask(
         selection.tileCoords.w,
         selection.tileCoords.h,
       );
@@ -66,6 +61,26 @@ export default function PromptBar() {
         prompt: translated,
       });
       state.setSelectionDraft({ ...selection, prompt });
+
+      // Persist to server cache — MUST happen before creating variant
+      const { resultImageId } = await api.image.saveResultCache(result.base64Result);
+
+      // Add as LayerVariant to active layer (variant system)
+      if (layerId) {
+        const variant: import('../../shared/types').LayerVariant = {
+          id: crypto.randomUUID(),
+          resultImageId,
+          source: 'ai-generated',
+          modelId: result.model,
+          applied: false,
+          width: activeLayer?.tileCoords.w ?? selection.tileCoords.w,
+          height: activeLayer?.tileCoords.h ?? selection.tileCoords.h,
+          createdAt: Date.now(),
+        };
+        state.addVariantToLayer(layerId, variant);
+        state.selectVariantForEditing(layerId, variant.id);
+      }
+
       state.addGeneratedVariant({
         id: crypto.randomUUID(),
         base64Result: result.base64Result,
@@ -74,112 +89,6 @@ export default function PromptBar() {
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Generate thất bại');
       state.setWorkflow(state.generatedVariants.length ? 'ai-review' : 'canvas-edit');
-    }
-  };
-
-  const applySelected = async () => {
-    const selection = state.selectionDraft;
-    if (!selectedVariant || !selection) return;
-    setError('');
-    state.setWorkflow('generating'); // show loading state during reprojection
-    try {
-      const { resultImageId } = await api.image.saveResultCache(selectedVariant.base64Result);
-
-      const existing = state.activeLayerId ? state.layers.find((layer) => layer.id === state.activeLayerId) : null;
-      const shapes = existing?.maskData ?? state.getMaskShapes?.() ?? [];
-      const maskEnabled = existing?.maskEnabled ?? false;
-
-      // For perspective layers, reproject immediately so 360 view has the equirectangular buffer ready
-      let equirectImageId: string | undefined;
-      if (selection.sourceView === '360') {
-        const reprojResult = await api.image.reproject({
-          resultImageId,
-          selection,
-          imagePath: state.imagePath!,
-          maskEnabled,
-          maskData: shapes.filter((s) => s.enabled !== false),
-        });
-        equirectImageId = reprojResult.equirectImageId;
-      }
-
-      const layer: Layer = {
-        id: existing?.id ?? crypto.randomUUID(),
-        order: existing?.order ?? state.layers.length + 1,
-        type: selection.sourceView === '360' ? 'perspective' : 'flat',
-        visible: existing?.visible ?? true,
-        ...selection.viewPose,
-        tileCoords: existing?.tileCoords ?? selection.tileCoords,
-        maskData: shapes,
-        maskEnabled,
-        maskForAi: existing?.maskForAi ?? true,
-        prompt,
-        resultImageId,
-        equirectImageId,
-        status: 'committed',
-        selection: { ...selection, prompt },
-      };
-      if (existing) state.updateLayer(existing.id, layer);
-      else state.addLayer(layer);
-      useProjectStore.setState({
-        activeLayerId: layer.id,
-        workflow: 'canvas-edit',
-        dirty: false,
-        maskDirty: false,
-        generatedVariants: [],
-        selectedVariantId: null,
-      });
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Apply thất bại');
-    }
-  };
-
-  const applyMaskOnly = async () => {
-    const layer = state.layers.find((l) => l.id === state.activeLayerId);
-    const selection = state.selectionDraft;
-    if (!layer?.resultImageId || !state.imagePath || !selection) return;
-    if (!state.maskDirty) return;
-    setError('');
-    state.setWorkflow('generating');
-    try {
-      // Merge canvas shapes with stored enable/disable state
-      const canvasShapes = state.getMaskShapes?.() ?? [];
-      const storedShapes = layer.maskData ?? [];
-      const storedMap = new Map(storedShapes.map((s) => [s.id, s]));
-
-      // Canvas shapes get their geometry, but inherit enabled state from stored
-      const merged: MaskShape[] = canvasShapes.map((cs) => ({
-        ...cs,
-        enabled: storedMap.get(cs.id)?.enabled ?? cs.enabled ?? true,
-      }));
-
-      // Also preserve stored shapes that are disabled (not rendered on canvas)
-      for (const ss of storedShapes) {
-        if (ss.enabled === false && !merged.find((m) => m.id === ss.id)) {
-          merged.push(ss);
-        }
-      }
-
-      const maskEnabled = layer.maskEnabled ?? false;
-      if (selection.sourceView === '360') {
-        const reprojResult = await api.image.reproject({
-          resultImageId: layer.resultImageId,
-          selection,
-          imagePath: state.imagePath,
-          maskEnabled,
-          maskData: merged.filter((s) => s.enabled !== false),
-        });
-        state.updateLayer(layer.id, {
-          equirectImageId: reprojResult.equirectImageId,
-          maskData: merged,
-          maskEnabled,
-        });
-      } else {
-        state.updateLayer(layer.id, { maskData: merged, maskEnabled });
-      }
-      useProjectStore.setState({ maskDirty: false, workflow: 'canvas-edit' });
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Apply mask thất bại');
-      state.setWorkflow('canvas-edit');
     }
   };
 
@@ -208,25 +117,6 @@ export default function PromptBar() {
       >
         {generating ? 'Generating…' : 'Generate'}
       </button>
-      {permission.ai && (
-        <button
-          className="prompt-btn prompt-btn-apply"
-          disabled={!selectedVariant}
-          onClick={() => void applySelected()}
-        >
-          Apply Selected
-        </button>
-      )}
-      {permission.ai && (
-        <button
-          className="prompt-btn prompt-btn-apply"
-          disabled={!activeLayer?.resultImageId || !state.maskDirty}
-          onClick={() => void applyMaskOnly()}
-          style={{ background: state.maskDirty ? '#0d7377' : undefined }}
-        >
-          Apply Mask
-        </button>
-      )}
       {error && <span className="prompt-error" title={error}>⚠ {error}</span>}
     </div>
   );

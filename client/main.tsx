@@ -1,4 +1,3 @@
-import React from 'react';
 import { createRoot } from 'react-dom/client';
 import '@photo-sphere-viewer/core/index.css';
 import './styles/theme.css';

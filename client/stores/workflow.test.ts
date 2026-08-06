@@ -20,15 +20,15 @@ test('rectangle selection locks camera and only enables rectangle', () => {
   });
 });
 
-test('canvas edit enables mask tools and AI only', () => {
+test('canvas edit enables AI without mask drawing tools', () => {
   assert.deepEqual(permissionsFor('canvas-edit'), {
     camera: false,
     viewControls: false,
     rect: false,
-    brush: true,
-    lasso: true,
-    eraser: true,
-    undo: true,
+    brush: false,
+    lasso: false,
+    eraser: false,
+    undo: false,
     ai: true,
   });
 });

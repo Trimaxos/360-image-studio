@@ -77,7 +77,7 @@ export interface Layer {
   // B2: Mask bên trong tileCoords (Brush/Lasso strokes)
   // Tọa độ các point cũng trong hệ pixel ảnh gốc
   maskData: MaskShape[];
-  maskEnabled?: boolean;  // true + maskData → limits display scope; default false → full layer
+  maskEnabled?: boolean;  // DEPRECATED — use variant.visibilityMask instead
   maskForAi?: boolean;   // true = send mask to AI to limit generation scope; default true
 
   prompt: string;
@@ -86,6 +86,31 @@ export interface Layer {
   status?: 'draft' | 'committed';
   name?: string;
   selection?: SelectionDraft;
+
+  // --- New fields (v4) ---
+  variants?: LayerVariant[];     // Danh sách kết quả AI/import
+}
+
+// ===== Layer Variant =====
+
+export interface LayerVariant {
+  id: string;                    // UUID
+  resultImageId: string;         // filename in cache dir (without .png extension)
+  source: 'ai-generated' | 'imported';
+  modelId?: string;              // model AI đã dùng (nếu ai-generated)
+  applied: boolean;              // true = variant này đang được apply (chỉ 1 variant/layer)
+  equirectImageId?: string;      // filename in cache dir — pre-rendered equirect for THIS variant (perspective layers)
+  visibilityMask?: {
+    base64Mask: string;          // base64 PNG mask (white=visible, black=hidden)
+    brushSize: number;           // px
+    brushSoftness: number;       // legacy field; mirrors 100 - hardness
+    brushOpacity?: number;       // 0-100%
+    brushHardness?: number;      // 0-100%
+  };
+  /** Kích thước thực tế của ảnh kết quả (pixel) */
+  width: number;
+  height: number;
+  createdAt: number;             // Date.now()
 }
 
 export interface SelectionDraft {
@@ -101,6 +126,8 @@ export interface SelectionDraft {
 
 export interface PerspectiveRenderRequest {
   imagePath: string;
+  /** Committed visible edits that must be baked into the source for a new layer. */
+  layers?: Layer[];
   viewPose: ViewPose;
   viewport: { width: number; height: number };
   rect: { x: number; y: number; width: number; height: number };
@@ -120,10 +147,23 @@ export interface ReprojectRequest {
   imagePath: string;
   maskEnabled?: boolean;
   maskData?: MaskShape[];
+  visibilityMask?: LayerVariant['visibilityMask'];
 }
 
 export interface ReprojectResponse {
   equirectImageId: string;
+}
+
+export interface VariantMaskCacheRequest {
+  variantId: string;
+  base64Mask: string;
+  softness: number;    // 0-100
+  width: number;
+  height: number;
+}
+
+export interface VariantMaskCacheResponse {
+  featheredMaskId: string;
 }
 
 export interface GeneratedVariant {
@@ -135,7 +175,7 @@ export interface GeneratedVariant {
 export interface AiModelOption {
   id: string;
   displayName: string;
-  provider: 'local' | 'fal';
+  provider: 'fal';
   capabilities: Array<'inpainting' | 'image-edit'>;
   enabled: boolean;
   disabledReason?: string;
@@ -149,11 +189,11 @@ export interface AiModelOption {
 
 export interface ModelCatalogResponse {
   groups: Array<{
-    provider: 'local' | 'fal';
+    provider: 'fal';
     label: string;
     models: AiModelOption[];
   }>;
-  errors?: Partial<Record<'local' | 'fal', string>>;
+  errors?: Partial<Record<'fal', string>>;
 }
 
 export interface MaskShape {
@@ -170,7 +210,7 @@ export interface MaskShape {
 // ===== AI =====
 
 export interface AiEditRequest {
-  provider: 'local' | 'fal';
+  provider: 'fal';
   modelId: string;
   base64Image: string;
   base64Mask: string;
@@ -196,7 +236,7 @@ export interface TranslateResponse {
 // ===== Project =====
 
 export interface ProjectFile {
-  version: 3;
+  version: 4;
   imagePath: string;
   layers: Layer[];
   horizon: Horizon;

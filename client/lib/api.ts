@@ -47,6 +47,7 @@ export const api = {
     },
     perspectiveRender: (body: {
       imagePath: string;
+      layers?: import('../../shared/types').Layer[];
       viewPose: import('../../shared/types').ViewPose;
       viewport: { width: number; height: number };
       rect: { x: number; y: number; width: number; height: number };

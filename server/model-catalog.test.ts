@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyFalModel, isLocalRuntimeReady, localArtifactComplete } from './model-catalog';
+import { classifyFalModel } from './model-catalog';
 
 test('fal image edit and inpainting models remain in catalog', () => {
   const item = classifyFalModel({
@@ -30,13 +30,3 @@ test('text to image model is omitted', () => {
   assert.equal(item, null);
 });
 
-test('partial local model download is not considered ready', () => {
-  assert.equal(localArtifactComplete(1_000_000_000), false);
-  assert.equal(localArtifactComplete(6_500_000_000), true);
-});
-
-test('local runtime is enabled only after the model is loaded', () => {
-  assert.equal(isLocalRuntimeReady({ status: 'ready', modelLoaded: true }), true);
-  assert.equal(isLocalRuntimeReady({ status: 'loading', modelLoaded: false }), false);
-  assert.equal(isLocalRuntimeReady({ status: 'error', modelLoaded: false }), false);
-});

@@ -4,9 +4,9 @@ import path from 'path';
 import fs from 'fs/promises';
 import multer from 'multer';
 import sharp from 'sharp';
-import { openImage, getTile, serveImage, exportImage, CACHE_DIR } from '../services/image-processor';
-import { renderPerspective, calcPerspectiveResolution, reprojectToEquirectangular } from '../services/perspective-projector';
-import type { ImageOpenRequest, ImageOpenResponse, TileRequest, ExportRequest, PerspectiveRenderRequest, ReprojectRequest } from '../../shared/types';
+import { openImage, getTile, serveImage, exportImage, applyVisibilityMask, CACHE_DIR } from '../services/image-processor';
+import { renderPerspective, reprojectToEquirectangular } from '../services/perspective-projector';
+import type { ImageOpenRequest, ImageOpenResponse, ExportRequest, PerspectiveRenderRequest, ReprojectRequest } from '../../shared/types';
 
 export const imageRouter = Router();
 
@@ -82,7 +82,7 @@ imageRouter.post('/cache-result', async (req, res) => {
 
 imageRouter.post('/perspective-render', async (req, res) => {
   try {
-    const { imagePath, viewPose, viewport, rect, mode } = req.body as PerspectiveRenderRequest;
+    const { imagePath, layers, viewPose, viewport, rect, mode } = req.body as PerspectiveRenderRequest;
     if (!imagePath?.trim()) return res.status(400).json({ error: 'imagePath is required' });
     if (!viewPose || viewPose.fov === undefined) return res.status(400).json({ error: 'viewPose with fov is required' });
     if (!viewport?.width || !viewport?.height) return res.status(400).json({ error: 'viewport is required' });
@@ -99,19 +99,38 @@ imageRouter.post('/perspective-render', async (req, res) => {
     };
 
     const scaleFactor = (req.body as any).scaleFactor ?? 1;
-    const result = await renderPerspective(imagePath, viewPose, viewport, effectiveRect, panoramaSize, scaleFactor);
+    let renderSource = imagePath;
+    let compositeTempPath: string | undefined;
+    try {
+      if (Array.isArray(layers) && layers.length > 0) {
+        compositeTempPath = path.join(CACHE_DIR, `layer-source-${randomUUID()}.png`);
+        await exportImage(
+          imagePath,
+          compositeTempPath,
+          'png',
+          95,
+          layers,
+          { yaw: 0, pitch: 0, roll: 0 },
+        );
+        renderSource = compositeTempPath;
+      }
 
-    // Cache the rendered perspective
-    const hash = createHash('sha256').update(result.buffer).digest('hex');
-    const cacheFile = path.join(CACHE_DIR, `${hash}.png`);
-    await fs.mkdir(path.dirname(cacheFile), { recursive: true });
-    await fs.writeFile(cacheFile, result.buffer);
+      const result = await renderPerspective(renderSource, viewPose, viewport, effectiveRect, panoramaSize, scaleFactor);
 
-    res.json({
-      resultImageId: hash,
-      width: result.width,
-      height: result.height,
-    });
+      // Cache the rendered perspective
+      const hash = createHash('sha256').update(result.buffer).digest('hex');
+      const cacheFile = path.join(CACHE_DIR, `${hash}.png`);
+      await fs.mkdir(path.dirname(cacheFile), { recursive: true });
+      await fs.writeFile(cacheFile, result.buffer);
+
+      res.json({
+        resultImageId: hash,
+        width: result.width,
+        height: result.height,
+      });
+    } finally {
+      if (compositeTempPath) await fs.unlink(compositeTempPath).catch(() => undefined);
+    }
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -119,7 +138,7 @@ imageRouter.post('/perspective-render', async (req, res) => {
 
 imageRouter.post('/reproject', async (req, res) => {
   try {
-    const { resultImageId, selection, imagePath, maskEnabled, maskData } = req.body as ReprojectRequest;
+    const { resultImageId, selection, imagePath, maskEnabled, maskData, visibilityMask } = req.body as ReprojectRequest;
     if (!resultImageId || !selection || !imagePath) {
       return res.status(400).json({ error: 'resultImageId, selection, and imagePath are required' });
     }
@@ -133,16 +152,65 @@ imageRouter.post('/reproject', async (req, res) => {
       height: metadata.height ?? 4096,
     };
 
+    // Persistently memoize this expensive operation. The key includes every
+    // input that can change the projected pixels, including the manual mask.
+    const visibilityMaskHash = visibilityMask?.base64Mask
+      ? createHash('sha256').update(visibilityMask.base64Mask).digest('hex')
+      : '';
+    const reprojectionKey = createHash('sha256').update(JSON.stringify({
+      version: 2,
+      resultImageId,
+      selection,
+      panoramaSize,
+      maskEnabled,
+      maskData,
+      visibilityMaskHash,
+    })).digest('hex');
+    const reprojectionIndex = path.join(CACHE_DIR, `reproject-${reprojectionKey}.txt`);
+    try {
+      const cachedId = (await fs.readFile(reprojectionIndex, 'utf8')).trim();
+      if (/^[a-f0-9]{64}$/.test(cachedId)) {
+        await fs.access(path.join(CACHE_DIR, `${cachedId}.png`));
+        return res.json({ equirectImageId: cachedId });
+      }
+    } catch {
+      // Cache miss: continue with reprojection.
+    }
+
     // Reconstruct minimal layer from selection + mask state for reprojection
     const layer = { selection, maskEnabled, maskData } as any;
 
-    const reprojected = await reprojectToEquirectangular(resultPath, layer, panoramaSize);
+    let reprojectionSource = resultPath;
+    let maskedTempPath: string | undefined;
+    if (visibilityMask?.base64Mask) {
+      const resultMetadata = await sharp(resultPath).metadata();
+      const width = resultMetadata.width ?? 1;
+      const height = resultMetadata.height ?? 1;
+      const masked = await applyVisibilityMask(
+        resultPath,
+        visibilityMask.base64Mask,
+        0,
+        width,
+        height,
+      );
+      maskedTempPath = path.join(CACHE_DIR, `masked-reproject-${randomUUID()}.png`);
+      await fs.writeFile(maskedTempPath, masked);
+      reprojectionSource = maskedTempPath;
+    }
+
+    let reprojected: Buffer;
+    try {
+      reprojected = await reprojectToEquirectangular(reprojectionSource, layer, panoramaSize);
+    } finally {
+      if (maskedTempPath) await fs.unlink(maskedTempPath).catch(() => undefined);
+    }
 
     // Cache the reprojected equirectangular buffer
     const hash = createHash('sha256').update(reprojected).digest('hex');
     const cacheFile = path.join(CACHE_DIR, `${hash}.png`);
     await fs.mkdir(path.dirname(cacheFile), { recursive: true });
     await fs.writeFile(cacheFile, reprojected);
+    await fs.writeFile(reprojectionIndex, hash, 'utf8');
 
     res.json({ equirectImageId: hash });
   } catch (err: any) {

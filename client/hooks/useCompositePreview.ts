@@ -6,7 +6,6 @@ export function useCompositePreview(): string | null {
   const imagePath = useProjectStore((state) => state.imagePath);
   const layers = useProjectStore((state) => state.layers);
   const [url, setUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const reviewKey = useMemo(
     () => layers.map((layer) => `${layer.id}:${layer.visible}:${layer.resultImageId}:${layer.status}:${layer.equirectImageId}`).join('|'),
     [layers],
@@ -18,10 +17,8 @@ export function useCompositePreview(): string | null {
     const committed = layers.filter((layer) => layer.status === 'committed');
     if (!imagePath || !committed.length) {
       setUrl(null);
-      setLoading(false);
       return;
     }
-    setLoading(true);
     const safeLayers = committed.map((layer) => ({
       ...layer,
       selection: layer.selection
@@ -35,10 +32,8 @@ export function useCompositePreview(): string | null {
         if (previous) URL.revokeObjectURL(previous);
         return objectUrl;
       });
-      setLoading(false);
     }).catch(() => {
       if (!disposed) setUrl(null);
-      setLoading(false);
     });
     return () => {
       disposed = true;

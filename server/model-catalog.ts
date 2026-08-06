@@ -1,14 +1,12 @@
-import fs from 'node:fs/promises';
 import type { AiModelOption, ModelCatalogResponse } from '../shared/types';
 import { config } from './config';
 
 const supportedInputs = new Set([
   'image_url', 'image_urls', 'image', 'mask_url', 'mask', 'prompt',
-  'strength', 'num_inference_steps', 'guidance_scale', 'seed',
+  'strength', 'num_inference_steps', 'guidance_scale', 'seed', 'negative_prompt',
   'output_format', 'safety_tolerance', 'sync_mode', 'num_images',
   'image_size', 'enable_safety_checker', 'dilate_pixels',
 ]);
-const minimumLocalArtifactBytes = 6_000_000_000;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
 let cachedCatalog: { fal: AiModelOption[]; ts: number } | null = null;
@@ -33,17 +31,6 @@ const CURATED_FAL_MODELS: CuratedModel[] = [
   { id: 'fal-ai/flux-2-max/edit', price: '~$0.10' },
 ];
 
-// ===== Local model helpers =====
-
-export function localArtifactComplete(sizeBytes: number): boolean {
-  return sizeBytes >= minimumLocalArtifactBytes;
-}
-
-export function isLocalRuntimeReady(payload: unknown): boolean {
-  const health = payload as { status?: unknown; modelLoaded?: unknown } | null;
-  return health?.status === 'ready' && health.modelLoaded === true;
-}
-
 // ===== Schema helpers =====
 
 function findInputSchema(schemas: Record<string, any>): { required: string[]; properties: string[] } | null {
@@ -67,6 +54,12 @@ function findInputSchema(schemas: Record<string, any>): { required: string[]; pr
 export function classifyFalModel(raw: Record<string, any>): AiModelOption | null {
   const id = raw.endpoint_id ?? raw.id ?? raw.model_id;
   if (!id) return null;
+  const categories = raw.metadata?.categories;
+  if (Array.isArray(categories)
+    && categories.includes('text-to-image')
+    && !categories.some((category: string) => /image-to-image|edit|inpaint/i.test(category))) {
+    return null;
+  }
 
   const schemas = raw.openapi?.components?.schemas
     ?? raw.open_api?.components?.schemas
@@ -94,44 +87,6 @@ export function classifyFalModel(raw: Record<string, any>): AiModelOption | null
     inputProperties: properties,
     hasMask,
   };
-}
-
-// ===== Local options =====
-
-async function localOptions(): Promise<AiModelOption[]> {
-  return Promise.all(config.localModels.map(async (model) => {
-    let reason = '';
-    if (!model.enabled) reason = 'Chưa bật trong cấu hình';
-    else {
-      try {
-        const stat = await fs.stat(model.path);
-        if (!localArtifactComplete(stat.size)) {
-          reason = 'Model đang tải hoặc file chưa hoàn chỉnh';
-        } else {
-          try {
-            const health = await fetch(`${config.localAiBaseUrl}/health`, {
-              signal: AbortSignal.timeout(1500),
-            });
-            if (!health.ok || !isLocalRuntimeReady(await health.json())) {
-              reason = 'Local AI runtime đang nạp model';
-            }
-          } catch {
-            reason = 'Local AI runtime chưa sẵn sàng';
-          }
-        }
-      } catch {
-        reason = `Chưa tải model: ${model.path}`;
-      }
-    }
-    return {
-      id: model.id,
-      displayName: model.displayName,
-      provider: 'local' as const,
-      capabilities: [...model.capabilities],
-      enabled: !reason,
-      disabledReason: reason || undefined,
-    };
-  }));
 }
 
 // ===== Fal.ai curated options =====
@@ -193,7 +148,6 @@ export async function getModelInfo(modelId: string): Promise<AiModelOption | und
 
 export async function getModelCatalog(): Promise<ModelCatalogResponse> {
   const errors: ModelCatalogResponse['errors'] = {};
-  const local = await localOptions();
   let fal: AiModelOption[] = [];
   try {
     fal = await falOptions();
@@ -202,7 +156,6 @@ export async function getModelCatalog(): Promise<ModelCatalogResponse> {
   }
   return {
     groups: [
-      { provider: 'local', label: 'Local', models: local },
       { provider: 'fal', label: 'fal.ai', models: fal },
     ],
     errors,

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { useProjectStore } from '../stores/project';
 import RectSelectionOverlay from '../components/RectSelectionOverlay';

@@ -18,6 +18,7 @@ export default function RectSelectionOverlay({
 }) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const startRef = useRef<Point | null>(null);
+  const applyingRef = useRef(false);
   const [rect, setRect] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState('');
@@ -38,6 +39,8 @@ export default function RectSelectionOverlay({
     );
   };
   const apply = async (mode: 'full-frame' | 'free-select') => {
+    if (applyingRef.current) return;
+    applyingRef.current = true;
     const box = overlayRef.current!.getBoundingClientRect();
     const selectionBounds = bounds(box);
     const selected = mode === 'full-frame'
@@ -71,6 +74,9 @@ export default function RectSelectionOverlay({
         if (!state.imagePath) throw new Error('Chưa mở ảnh panorama.');
         const result = await api.image.perspectiveRender({
           imagePath: state.imagePath,
+          // A new edit must start from what the user currently sees, not from
+          // the untouched panorama file beneath all committed layers.
+          layers: state.layers.filter((layer) => layer.status === 'committed' && layer.visible !== false),
           viewPose,
           viewport: { width: box.width, height: box.height },
           rect: selected,
@@ -82,14 +88,17 @@ export default function RectSelectionOverlay({
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Không tạo được vùng chỉnh sửa.');
       setApplying(false);
+      applyingRef.current = false;
     }
   };
 
   return (
     <div
       ref={overlayRef}
-      className="rect-select-overlay"
+      className={`rect-select-overlay ${applying ? 'applying' : ''}`}
+      aria-busy={applying}
       onPointerDown={(event) => {
+        if (applying) return;
         if (event.button !== 0) return;
         const box = overlayRef.current!.getBoundingClientRect();
         const p = point(event, box);
@@ -98,11 +107,13 @@ export default function RectSelectionOverlay({
         event.currentTarget.setPointerCapture(event.pointerId);
       }}
       onPointerMove={(event) => {
+        if (applying) return;
         if (!startRef.current) return;
         const box = overlayRef.current!.getBoundingClientRect();
         setRect(dragRect(startRef.current, point(event, box), bounds(box)));
       }}
       onPointerUp={(event) => {
+        if (applying) return;
         if (!startRef.current) return;
         const box = overlayRef.current!.getBoundingClientRect();
         setRect(dragRect(startRef.current, point(event, box), bounds(box)));
@@ -120,10 +131,22 @@ export default function RectSelectionOverlay({
         <span>{Math.round(rect.width)} × {Math.round(rect.height)}</span>
       </div>}
       <div className="rect-actions" onPointerDown={(event) => event.stopPropagation()}>
-        <button onClick={() => state.leaveCanvas('discard')}>Cancel</button>
+        <button disabled={applying} onClick={() => state.leaveCanvas('discard')}>Cancel</button>
         <button disabled={applying} onClick={() => void apply('full-frame')}>Full Frame</button>
-        <button className="primary" disabled={!hasRect || applying} onClick={() => void apply('free-select')}>Apply Rect</button>
+        <button className="primary" disabled={!hasRect || applying} onClick={() => void apply('free-select')}>{applying ? 'Đang chuẩn bị…' : 'Apply Rect'}</button>
       </div>
+      {applying && (
+        <div className="rect-apply-progress" role="status" aria-live="polite">
+          <span className="inline-spinner" />
+          <div>
+            <strong>Đang chuẩn bị vùng chỉnh sửa…</strong>
+            <span>{state.layers.some((layer) => layer.status === 'committed' && layer.visible !== false)
+              ? 'Đang tổng hợp các layer và dựng ảnh phối cảnh.'
+              : 'Đang dựng ảnh phối cảnh từ panorama.'}</span>
+            <small>Ảnh panorama lớn có thể cần một chút thời gian.</small>
+          </div>
+        </div>
+      )}
       {error && <div className="rect-error">{error}</div>}
     </div>
   );

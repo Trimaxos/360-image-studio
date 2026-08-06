@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { SphereGeometry, Mesh, MeshBasicMaterial, TextureLoader } from 'three';
 import { api } from '../lib/api';
 import { useProjectStore } from '../stores/project';
