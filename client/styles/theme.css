@@ -1031,7 +1031,8 @@ html, body, #root {
   min-width: 0;
 }
 .region-select-modes,
-.region-select-actions {
+.region-select-actions,
+.region-select-colors {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1041,6 +1042,61 @@ html, body, #root {
   border-color: var(--accent);
   background: var(--accent);
   color: #fff;
+}
+.region-color-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .04);
+  color: var(--text2);
+  font-size: 12px;
+}
+.region-color-chip.disabled {
+  opacity: .55;
+}
+.region-color-chip input[type="color"] {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+.region-color-chip input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+.region-color-chip input:disabled {
+  cursor: not-allowed;
+}
+.region-color-chip button {
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  line-height: 1;
+}
+.region-color-chip button:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+.region-select-hex {
+  width: 78px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: monospace;
+  font-size: 12px;
 }
 .region-select-actions button.primary {
   border-color: var(--success);

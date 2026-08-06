@@ -6,7 +6,6 @@ import {
   clampPoint,
   containRect,
   dragRect,
-  layerIntersectsSelection,
   mapViewportRectToImage,
   type Point,
   type Rect,
@@ -22,7 +21,6 @@ export default function RectSelectionOverlay({
   const applyingRef = useRef(false);
   const [rect, setRect] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const [applying, setApplying] = useState(false);
-  const [applyingLayerCount, setApplyingLayerCount] = useState(0);
   const [error, setError] = useState('');
   const state = useProjectStore();
   const hasRect = rect.width >= 8 && rect.height >= 8;
@@ -49,7 +47,6 @@ export default function RectSelectionOverlay({
       ? selectionBounds
       : rect;
     setApplying(true);
-    setApplyingLayerCount(0);
     setError('');
     try {
       const viewPose = state.viewLock ?? state.viewPose;
@@ -73,22 +70,13 @@ export default function RectSelectionOverlay({
         // Flat view — no perspective rendering needed
         state.createPerspectiveLayer(selection, '', selection.tileCoords.w, selection.tileCoords.h);
       } else {
-        // 360 view — server-side perspective render
+        // 360 view — server-side perspective render, always from the
+        // untouched source panorama (no layer compositing) to keep this
+        // fast. Pick non-overlapping selections to avoid stacking edits.
         if (!state.imagePath) throw new Error('Chưa mở ảnh panorama.');
-        const relevantLayers = state.layers.filter((layer) =>
-          layer.status === 'committed'
-          && layer.visible !== false
-          && layerIntersectsSelection(layer, selection, {
-            width: state.imageWidth,
-            height: state.imageHeight,
-          }),
-        );
-        setApplyingLayerCount(relevantLayers.length);
         const result = await api.image.perspectiveRender({
           imagePath: state.imagePath,
-          // A new edit must start from what the user currently sees, not from
-          // the untouched panorama file beneath all committed layers.
-          layers: relevantLayers,
+          layers: [],
           viewPose,
           viewport: { width: box.width, height: box.height },
           rect: selected,
@@ -152,9 +140,7 @@ export default function RectSelectionOverlay({
           <span className="inline-spinner" />
           <div>
             <strong>Đang chuẩn bị vùng chỉnh sửa…</strong>
-            <span>{applyingLayerCount > 0
-              ? 'Đang tổng hợp các layer và dựng ảnh phối cảnh.'
-              : 'Đang dựng ảnh phối cảnh từ panorama.'}</span>
+            <span>Đang dựng ảnh phối cảnh từ panorama.</span>
             <small>Ảnh panorama lớn có thể cần một chút thời gian.</small>
           </div>
         </div>
