@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { PointerEvent as ReactPointerEvent } from 'react';
+import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react';
 import type { LayerVariant } from '../../shared/types';
 import { api } from '../lib/api';
 import { useProjectStore } from '../stores/project';
@@ -9,6 +9,7 @@ type Tool = 'erase' | 'restore';
 
 export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
   const displayRef = useRef<HTMLCanvasElement>(null);
+  const workspaceRef = useRef<HTMLDivElement>(null);
   const maskRef = useRef<HTMLCanvasElement | undefined>(undefined);
   const imageRef = useRef<HTMLImageElement | undefined>(undefined);
   const originalRef = useRef<HTMLImageElement | undefined>(undefined);
@@ -23,6 +24,8 @@ export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
   const [hardness, setHardness] = useState(variant.visibilityMask?.brushHardness ?? 80);
   const [ready, setReady] = useState(false);
   const [showOriginal, setShowOriginal] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [fittedSize, setFittedSize] = useState({ width: 0, height: 0 });
   const [, refreshHistory] = useState(0);
   const [cursor, setCursor] = useState<{ x: number; y: number; scale: number }>();
   const originalUrl = useProjectStore((state) => {
@@ -154,6 +157,22 @@ export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
   }, [redraw, variant.resultImageId, variant.visibilityMask?.base64Mask]);
 
   useEffect(() => {
+    const canvas = displayRef.current;
+    const workspace = workspaceRef.current;
+    if (!ready || !canvas || !workspace) return;
+    const measure = () => {
+      const availableWidth = Math.max(1, workspace.clientWidth);
+      const availableHeight = Math.max(280, window.innerHeight * .58);
+      const scale = Math.min(1, availableWidth / canvas.width, availableHeight / canvas.height);
+      setFittedSize({ width: canvas.width * scale, height: canvas.height * scale });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(workspace);
+    return () => observer.disconnect();
+  }, [ready]);
+
+  useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey)) return;
       if (event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); }
@@ -207,13 +226,12 @@ export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
   };
   const movePaint = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     const next = point(event);
-    const bounds = event.currentTarget.getBoundingClientRect();
-    // Cursor is absolutely positioned relative to the workspace, while pointer
-    // coordinates are relative to the canvas. Include the canvas offset so the
-    // visual brush ring and the painted mask use the exact same position.
+    const workspaceBounds = workspaceRef.current?.getBoundingClientRect();
+    // Keep the brush ring in workspace coordinates, including scroll offsets,
+    // while painting continues to use the canvas's pixel coordinates.
     setCursor({
-      x: event.currentTarget.offsetLeft + event.clientX - bounds.left,
-      y: event.currentTarget.offsetTop + event.clientY - bounds.top,
+      x: event.clientX - (workspaceBounds?.left ?? 0) + (workspaceRef.current?.scrollLeft ?? 0),
+      y: event.clientY - (workspaceBounds?.top ?? 0) + (workspaceRef.current?.scrollTop ?? 0),
       scale: next.scale,
     });
     if (drawingRef.current) paintTo(next);
@@ -234,6 +252,13 @@ export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
     onClose();
   };
 
+  const changeZoom = (next: number) => setZoom(Math.min(4, Math.max(.25, next)));
+  const handleZoomWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
+    if (!event.ctrlKey && !event.metaKey) return;
+    event.preventDefault();
+    changeZoom(zoom * (event.deltaY < 0 ? 1.15 : 1 / 1.15));
+  };
+
   return <div className="result-mask-backdrop" role="dialog" aria-modal="true" aria-label="Chỉnh sửa vùng hiển thị">
     <div className="result-mask-modal">
       <header className="result-mask-header"><div><h2>Tinh chỉnh kết quả</h2><p>Xóa phần AI không cần thiết hoặc phục hồi lại bất cứ lúc nào.</p></div><div className="result-mask-header-actions"><button className={`compare ${showOriginal ? 'active' : ''}`} onClick={toggleOriginal}>◉ {showOriginal ? 'Ẩn ảnh gốc' : 'Hiện ảnh gốc'}</button><button className="primary" onClick={save}>✓ Áp dụng chỉnh sửa</button><button onClick={onClose} aria-label="Đóng">✕</button></div></header>
@@ -241,7 +266,8 @@ export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
         <div className="result-mask-mode"><button className={tool === 'erase' ? 'active erase' : ''} onClick={() => setTool('erase')}>⌫ Xóa</button><button className={tool === 'restore' ? 'active restore' : ''} onClick={() => setTool('restore')}>♻ Phục hồi</button><button onClick={resetMask}>Phục hồi toàn bộ</button><button disabled={!undoRef.current.length} onClick={undo} title="Undo (Ctrl+Z)">↶</button><button disabled={!redoRef.current.length} onClick={redo} title="Redo (Ctrl+Y)">↷</button><details className="result-mask-help-popover"><summary aria-label="Hướng dẫn sử dụng brush" title="Hướng dẫn sử dụng"><span>i</span></summary><div><strong>Hướng dẫn brush:</strong><ul><li><b>Xóa:</b> quét vùng muốn trong suốt</li><li><b>Phục hồi:</b> lấy lại pixel gốc</li><li><b>Độ cứng = 0:</b> viền mờ dần (feather)</li><li><b>Độ mờ &lt; 100%:</b> xóa/phục hồi bán phần</li><li>Ctrl+Z / Ctrl+Y để undo/redo</li></ul></div></details></div>
         <div className="result-mask-sliders"><label>Kích thước <strong>{size}px</strong><input type="range" min="10" max="300" value={size} onChange={(event) => setSize(+event.target.value)} /></label><label>Độ mờ <strong>{opacity}%</strong><input type="range" min="5" max="100" value={opacity} onChange={(event) => setOpacity(+event.target.value)} /></label><label>Độ cứng <strong>{hardness}%</strong><input type="range" min="0" max="100" value={hardness} onChange={(event) => setHardness(+event.target.value)} /></label></div>
       </div>
-      <div className="result-mask-workspace" onMouseLeave={() => setCursor(undefined)}><canvas ref={displayRef} onPointerDown={startPaint} onPointerMove={movePaint} onPointerUp={stopPaint} onPointerCancel={stopPaint} />{!ready && <span className="result-mask-loading">Đang tải ảnh…</span>}{cursor && <span className="result-mask-cursor" style={{ left: cursor.x, top: cursor.y, width: size / cursor.scale, height: size / cursor.scale }} />}</div>
+      <div className="result-mask-zoom"><button onClick={() => changeZoom(zoom / 1.25)} aria-label="Thu nhỏ">−</button><strong>{Math.round(zoom * 100)}%</strong><button onClick={() => changeZoom(zoom * 1.25)} aria-label="Phóng to">+</button><button onClick={() => setZoom(1)}>Vừa khung</button><span>Ctrl + con lăn để zoom</span></div>
+      <div ref={workspaceRef} className="result-mask-workspace" onWheel={handleZoomWheel} onMouseLeave={() => setCursor(undefined)}><div className="result-mask-canvas-shell" style={{ width: fittedSize.width * zoom || undefined, height: fittedSize.height * zoom || undefined }}><canvas ref={displayRef} style={fittedSize.width ? { width: fittedSize.width * zoom, height: fittedSize.height * zoom } : undefined} onPointerDown={startPaint} onPointerMove={movePaint} onPointerUp={stopPaint} onPointerCancel={stopPaint} /></div>{!ready && <span className="result-mask-loading">Đang tải ảnh…</span>}{cursor && <span className="result-mask-cursor" style={{ left: cursor.x, top: cursor.y, width: size / cursor.scale, height: size / cursor.scale }} />}</div>
     </div>
   </div>;
 }

@@ -1276,13 +1276,45 @@ html, body, #root {
   width: 100%;
   accent-color: #9333ea;
 }
+.result-mask-zoom {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  margin: 0 22px 8px;
+  color: #64748b;
+  font-size: 12px;
+}
+.result-mask-zoom button {
+  min-width: 32px;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  background: #fff;
+  color: #334155;
+  cursor: pointer;
+}
+.result-mask-zoom button:hover {
+  border-color: #93b4ea;
+  background: #eff6ff;
+  color: #2563eb;
+}
+.result-mask-zoom strong {
+  min-width: 46px;
+  color: #1e293b;
+  text-align: center;
+}
+.result-mask-zoom span {
+  margin-left: 4px;
+}
 .result-mask-workspace {
   position: relative;
   display: grid;
   place-items: center;
   min-height: 280px;
   margin: 0 22px;
-  overflow: hidden;
+  overflow: auto;
   border: 1px solid #dbe1ea;
   border-radius: 12px;
   background-color: #fff;
@@ -1294,10 +1326,14 @@ html, body, #root {
   background-position: 0 0, 0 10px, 10px -10px, -10px 0;
   background-size: 20px 20px;
 }
+.result-mask-canvas-shell {
+  position: relative;
+  flex: 0 0 auto;
+}
 .result-mask-workspace canvas {
   display: block;
-  max-width: 100%;
-  max-height: 58vh;
+  max-width: none;
+  max-height: none;
   touch-action: none;
   cursor: none;
 }
