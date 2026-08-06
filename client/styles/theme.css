@@ -954,6 +954,11 @@ html, body, #root {
   font-size: 11px;
   white-space: nowrap;
 }
+.canvas-toolbar-actions button.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
 .canvas-stage {
   flex: 1;
   min-height: 0;
@@ -976,6 +981,96 @@ html, body, #root {
 }
 .canvas-source-message.error {
   color: #ff8ca0;
+}
+.region-indicator-svg {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+.region-indicator-shape {
+  fill: rgba(233, 69, 96, .12);
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+}
+.region-select-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  background: rgba(3, 6, 18, .92);
+}
+.region-select-hint {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  color: var(--text2);
+  font-size: 12px;
+}
+.region-select-hint button {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.region-select-hint span {
+  flex: 1;
+  min-width: 0;
+}
+.region-select-modes,
+.region-select-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.region-select-modes button.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+.region-select-actions button.primary {
+  border-color: var(--success);
+  background: var(--success);
+  color: #fff;
+}
+.region-select-stage {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  position: relative;
+  overflow: hidden;
+}
+.region-select-image {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  pointer-events: none;
+  user-select: none;
+}
+.region-select-stage canvas {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  cursor: crosshair;
+  touch-action: none;
+}
+.region-select-loading {
+  color: var(--text2);
 }
 .canvas-exchange-message {
   flex-shrink: 0;

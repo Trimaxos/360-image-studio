@@ -8,6 +8,7 @@ import {
 import { useProjectStore } from '../stores/project';
 import { applyVariantToPanorama } from '../lib/apply-variant';
 import { composeVariantPreview } from '../lib/visibility-mask';
+import RegionSelectOverlay from './RegionSelectOverlay';
 import UnsavedChangesDialog from './UnsavedChangesDialog';
 import VariantGallery from './VariantGallery';
 import type { LayerVariant } from '../../shared/types';
@@ -22,6 +23,8 @@ export default function CanvasEditor() {
   const [sourceError, setSourceError] = useState('');
   const [exchangeMessage, setExchangeMessage] = useState('');
   const [returningToView, setReturningToView] = useState(false);
+  const [selectingRegion, setSelectingRegion] = useState(false);
+  const [imageTransform, setImageTransform] = useState<{ left: number; top: number; scale: number } | null>(null);
   const selectedVariant = useMemo(
     () => state.generatedVariants.find((item) => item.id === state.selectedVariantId),
     [state.generatedVariants, state.selectedVariantId],
@@ -73,9 +76,11 @@ export default function CanvasEditor() {
           throw new Error('Ảnh vùng chọn không có kích thước hợp lệ.');
         }
       const scale = Math.min(canvas.width! / image.width!, canvas.height! / image.height!);
+      const left = (canvas.width! - image.width! * scale) / 2;
+      const top = (canvas.height! - image.height! * scale) / 2;
       image.set({
-        left: (canvas.width! - image.width! * scale) / 2,
-        top: (canvas.height! - image.height! * scale) / 2,
+        left,
+        top,
         scaleX: scale,
         scaleY: scale,
         selectable: false,
@@ -84,6 +89,7 @@ export default function CanvasEditor() {
       canvas.add(image);
       canvas.requestRenderAll();
       setSourceStatus('ready');
+      setImageTransform({ left, top, scale });
 
       canvas.isDrawingMode = false;
       fabricRef.current = canvas;
@@ -237,6 +243,17 @@ export default function CanvasEditor() {
         </button>
         <span>{activeLayer ? `${activeLayer.tileCoords.w} × ${activeLayer.tileCoords.h}px` : 'Edit Canvas'}</span>
         <div className="canvas-toolbar-actions">
+          <button
+            className={state.regionEdit ? 'active' : ''}
+            disabled={sourceStatus !== 'ready'}
+            onClick={() => setSelectingRegion(true)}
+            title="Vẽ vùng cụ thể để AI chỉ tập trung sửa đúng chỗ đó"
+          >
+            ✎ {state.regionEdit ? 'Đã chọn vùng' : 'Chọn vùng chỉnh sửa'}
+          </button>
+          {state.regionEdit && (
+            <button onClick={() => state.setRegionEdit(null)} title="Bỏ giới hạn vùng, quay lại sửa toàn bộ ảnh">✕ Bỏ vùng</button>
+          )}
           <button disabled={sourceStatus !== 'ready'} onClick={() => void downloadCanvas()}>Download Image</button>
           <button disabled={sourceStatus !== 'ready'} onClick={() => void copyCanvas()}>Copy Image</button>
           <button disabled={sourceStatus !== 'ready'} onClick={() => resultInputRef.current?.click()}>Import Result</button>
@@ -248,6 +265,28 @@ export default function CanvasEditor() {
         {sourceStatus === 'error' && <div className="canvas-source-message error">{sourceError}</div>}
         {selectedVariant && (
           <img className="selected-variant-preview" src={`data:image/png;base64,${selectedVariant.base64Result}`} alt="Selected result" />
+        )}
+        {state.regionEdit && imageTransform && !selectingRegion && (() => {
+          const { points } = state.regionEdit;
+          const toStage = (p: { x: number; y: number }) =>
+            `${imageTransform.left + p.x * imageTransform.scale},${imageTransform.top + p.y * imageTransform.scale}`;
+          const polygon = points.map(toStage).join(' ');
+          // Evenodd hole: a giant outer rect minus the traced polygon dims
+          // everything except the exact shape the user drew.
+          const holePath = `M-99999,-99999 H99999 V99999 H-99999 Z M${polygon.replace(/ /g, ' L')} Z`;
+          return (
+            <svg className="region-indicator-svg">
+              <path d={holePath} fillRule="evenodd" fill="rgba(0,0,0,.5)" />
+              <polygon points={polygon} className="region-indicator-shape" />
+            </svg>
+          );
+        })()}
+        {selectingRegion && sourceUrl && (
+          <RegionSelectOverlay
+            sourceUrl={sourceUrl}
+            onCancel={() => setSelectingRegion(false)}
+            onSelect={(region) => { state.setRegionEdit(region); setSelectingRegion(false); }}
+          />
         )}
       </div>
       {exchangeMessage && <div className="canvas-exchange-message">{exchangeMessage}</div>}
