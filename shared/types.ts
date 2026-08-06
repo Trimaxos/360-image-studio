@@ -219,7 +219,11 @@ export interface AiEditRequest {
   provider: 'fal';
   modelId: string;
   base64Image: string;
-  base64Mask: string;
+  base64Mask?: string;
+  /** True when base64Mask is a real, user-drawn region mask (not the
+   *  meaningless full-white placeholder) — tells the server to forward it
+   *  whenever the model supports mask input, not only when it's required. */
+  hasRegionMask?: boolean;
   prompt: string;  // always in English by this point
 }
 

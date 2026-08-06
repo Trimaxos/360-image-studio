@@ -19,6 +19,48 @@ export function buildPreservationPrompt(editRequest: string): string {
   return `${PRESERVATION_RULES} EDIT REQUEST: ${editRequest.trim()}`;
 }
 
+// Used when the request carries a drawn region (see RegionEdit): the client
+// always blends the result back so nothing outside the region survives, so
+// the model doesn't need to be told to hold back — telling it to anyway (via
+// the preservation prompt above) actively fights instructions like "add
+// people", since that wording discourages adding anything at all.
+const REGION_EDIT_RULES = [
+  'Make the requested edit clearly and fully within the specified region of the image — do not hold back or make only a token, barely visible change.',
+  'You may freely add, remove, recolor, resize, or otherwise change content within that region as needed to fully satisfy the request.',
+  'Preserve the exact camera position, framing, perspective, and everything outside the specified region exactly unchanged.',
+].join(' ');
+
+const REGION_EDIT_NEGATIVE_PROMPT = [
+  'zoom, crop, reframing, camera movement, perspective change, geometry change,',
+  'changes outside the specified region, changed unrelated areas, subtle or barely visible edit',
+].join(' ');
+
+export function buildRegionEditPrompt(editRequest: string): string {
+  return `${REGION_EDIT_RULES} EDIT REQUEST: ${editRequest.trim()}`;
+}
+
+// fal.ai rejects request images over ~25MB. A lossless PNG of a full-resolution
+// panorama crop (e.g. 5600×3000) can exceed that easily; re-encoding as JPEG
+// shrinks photographic content dramatically with negligible quality loss for
+// what the AI needs to read. Only used for the outgoing request — the
+// original base64Image/base64Mask (full quality, unchanged dimensions) is
+// still used for local blending and for sizing the returned result.
+const MAX_REQUEST_IMAGE_BYTES = 20 * 1024 * 1024;
+
+async function toRequestDataUri(base64: string): Promise<string> {
+  const buffer = Buffer.from(base64, 'base64');
+  if (buffer.length <= MAX_REQUEST_IMAGE_BYTES) {
+    return `data:image/png;base64,${base64}`;
+  }
+  let quality = 90;
+  let jpeg = await sharp(buffer).jpeg({ quality }).toBuffer();
+  while (jpeg.length > MAX_REQUEST_IMAGE_BYTES && quality > 35) {
+    quality -= 15;
+    jpeg = await sharp(buffer).jpeg({ quality }).toBuffer();
+  }
+  return `data:image/jpeg;base64,${jpeg.toString('base64')}`;
+}
+
 export async function normalizeResultToSourceDimensions(
   sourceImage: Buffer,
   resultImage: Buffer,
@@ -50,16 +92,19 @@ class FalProvider implements AiProvider {
     private endpointId?: string,
     private extraParams?: Record<string, string | number | boolean>,
     private maskRequired?: boolean,
+    private isRegionEdit?: boolean,
   ) {}
   async edit(base64Image: string, base64Mask: string, prompt: string) {
     if (!config.falAiKey) throw new Error('FAL_AI_KEY chưa được cấu hình');
 
-    const imageDataUri = `data:image/png;base64,${base64Image}`;
-    const maskDataUri = `data:image/png;base64,${base64Mask}`;
+    const imageDataUri = await toRequestDataUri(base64Image);
+    const maskDataUri = await toRequestDataUri(base64Mask);
     const props = this.inputProperties;
 
     // Build request body dynamically based on model's input schema
-    const body: Record<string, any> = { prompt: buildPreservationPrompt(prompt) };
+    const body: Record<string, any> = {
+      prompt: this.isRegionEdit ? buildRegionEditPrompt(prompt) : buildPreservationPrompt(prompt),
+    };
 
     // Image input: support both image_url (single) and image_urls (array)
     if (props.includes('image_urls')) {
@@ -85,10 +130,13 @@ class FalProvider implements AiProvider {
     }
 
     if (props.includes('negative_prompt')) {
-      body.negative_prompt = PRESERVATION_NEGATIVE_PROMPT;
+      body.negative_prompt = this.isRegionEdit ? REGION_EDIT_NEGATIVE_PROMPT : PRESERVATION_NEGATIVE_PROMPT;
     }
     if (props.includes('strength')) {
-      body.strength = 0.25;
+      // Region edits are blended back locally regardless, so the model can be
+      // given more room to actually change the region (low strength biases
+      // heavily toward "barely touch it", which fights additive requests).
+      body.strength = this.isRegionEdit ? 0.6 : 0.25;
     }
 
     // Sync mode for faster response
@@ -131,9 +179,10 @@ export function getProviderFor(
   endpointId?: string,
   extraParams?: Record<string, string | number | boolean>,
   maskRequired?: boolean,
+  isRegionEdit?: boolean,
 ): AiProvider {
   if (provider !== 'fal') throw new Error(`Unsupported AI provider: ${provider}`);
-  return new FalProvider(modelId, inputProperties, endpointId, extraParams, maskRequired);
+  return new FalProvider(modelId, inputProperties, endpointId, extraParams, maskRequired, isRegionEdit);
 }
 
 export async function aiEdit(
@@ -146,8 +195,9 @@ export async function aiEdit(
   endpointId?: string,
   extraParams?: Record<string, string | number | boolean>,
   maskRequired?: boolean,
+  isRegionEdit?: boolean,
 ) {
-  const provider = getProviderFor(providerName, modelId, inputProperties, endpointId, extraParams, maskRequired);
+  const provider = getProviderFor(providerName, modelId, inputProperties, endpointId, extraParams, maskRequired, isRegionEdit);
   const result = await provider.edit(base64Image, base64Mask, prompt);
   return { ...result, provider: provider.name };
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { blobToBase64, createWhiteMask } from '../lib/mask-utils';
+import { blendRegionResult, describeRegionLocation } from '../lib/region-edit';
 import { permissionsFor } from '../stores/workflow';
 import { useProjectStore } from '../stores/project';
 import ModelSelector from './ModelSelector';
@@ -47,25 +48,42 @@ export default function PromptBar() {
         base64Image = await blobToBase64(await imageResponse.blob());
       }
 
-      // Mask drawing has been removed: AI always edits the full selected rectangle.
+      // A drawn region (RegionSelectOverlay) does NOT crop the request — the AI
+      // still sees the full image so it has real scene context to work from
+      // (an isolated, feature-less crop makes weaker models hallucinate wrong
+      // content). Instead, the result is blended back afterward so only the
+      // drawn area actually changes, and — for models with real inpainting
+      // mask support — the region mask is also sent to guide the edit there.
+      const region = state.regionEdit;
+
       // Must match base64Image's real pixel size, not the on-screen selection rect —
       // for '360' selections these differ (viewport px vs. rendered perspective px).
-      const effectiveMask = await createWhiteMask(
-        activeLayer?.tileCoords.w ?? selection.tileCoords.w,
-        activeLayer?.tileCoords.h ?? selection.tileCoords.h,
-      );
+      const imageWidth = activeLayer?.tileCoords.w ?? selection.tileCoords.w;
+      const imageHeight = activeLayer?.tileCoords.h ?? selection.tileCoords.h;
+      const effectiveMask = region?.maskBase64 ?? await createWhiteMask(imageWidth, imageHeight);
+
+      // Many models have no real mask input at all — without this, they have
+      // zero information about where in the image the region actually is.
+      const promptWithLocation = region
+        ? `${translated} (apply this specifically within the region at ${describeRegionLocation(region.points, imageWidth, imageHeight)})`
+        : translated;
 
       const result = await api.ai.edit({
         provider: model.provider,
         modelId: model.id,
         base64Image,
         base64Mask: effectiveMask,
-        prompt: translated,
+        hasRegionMask: !!region,
+        prompt: promptWithLocation,
       });
+      const finalResult = region
+        ? await blendRegionResult(base64Image, result.base64Result, region.maskBase64)
+        : result.base64Result;
       state.setSelectionDraft({ ...selection, prompt });
+      state.setRegionEdit(null);
 
       // Persist to server cache — MUST happen before creating variant
-      const { resultImageId } = await api.image.saveResultCache(result.base64Result);
+      const { resultImageId } = await api.image.saveResultCache(finalResult);
 
       // Add as LayerVariant to active layer (variant system)
       if (layerId) {
@@ -85,7 +103,7 @@ export default function PromptBar() {
 
       state.addGeneratedVariant({
         id: crypto.randomUUID(),
-        base64Result: result.base64Result,
+        base64Result: finalResult,
         modelId: result.model,
       });
     } catch (reason) {

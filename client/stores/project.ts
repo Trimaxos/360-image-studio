@@ -22,6 +22,22 @@ export interface RectSelect {
 export type ActiveTool = 'rect' | null;
 export type ViewMode = 'viewer' | 'canvas';
 
+/**
+ * A user-drawn region within the currently displayed canvas-edit image.
+ * Generate still sends the AI the *full* image (so it has real scene context
+ * instead of an isolated crop), but the result is only kept within this
+ * region — everywhere else reverts to the original (see blendRegionResult).
+ * For models with real inpainting mask support, `maskBase64` is also sent as
+ * the AI's own mask so it's guided to edit there directly.
+ */
+export interface RegionEdit {
+  /** The drawn lasso outline, in full-image pixel space — used to redraw
+   *  exactly what the user traced (see CanvasEditor's indicator). */
+  points: { x: number; y: number }[];
+  /** Full-image-sized grayscale mask rasterized from `points` (white = inside). */
+  maskBase64: string;
+}
+
 interface EditSnapshot {
   layer: Layer | null;
   selection: SelectionDraft | null;
@@ -41,6 +57,7 @@ export interface ProjectState {
   activeLayerId: string | null;
   rectSelect: RectSelect | null;
   selectionDraft: SelectionDraft | null;
+  regionEdit: RegionEdit | null;
   editSnapshot: EditSnapshot | null;
   dirty: boolean;
   hasUnsavedChanges: boolean;
@@ -64,6 +81,7 @@ export interface ProjectState {
   setHorizon(horizon: Partial<Horizon>): void;
   setPreview(imageBase64: string | null, layer?: Partial<Layer>): void;
   setSelectionDraft(selection: SelectionDraft | null): void;
+  setRegionEdit(region: RegionEdit | null): void;
   markDirty(): void;
   markProjectSaved(): void;
   setSelectedModel(model: AiModelOption | null): void;
@@ -102,6 +120,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   activeLayerId: null,
   rectSelect: null,
   selectionDraft: null,
+  regionEdit: null,
   editSnapshot: null,
   dirty: false,
   hasUnsavedChanges: false,
@@ -158,6 +177,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       activeLayerId: layerId,
       workflow: 'canvas-edit',
       selectionDraft: selection,
+      regionEdit: null,
       activeTool: null,
       editSnapshot: { layer: null, selection },
       dirty: false,
@@ -173,6 +193,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       activeLayerId: id,
       activeTool: null,
       selectionDraft: layer.selection ?? null,
+      regionEdit: null,
       editSnapshot: { layer: structuredClone(layer), selection: layer.selection ?? null },
       dirty: false,
       generatedVariants: [],
@@ -188,6 +209,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setHorizon: (horizon) => get().updateViewPose(horizon),
   setPreview: (previewImage, previewLayer) => set({ previewImage, previewLayer: previewLayer ?? null }),
   setSelectionDraft: (selectionDraft) => set({ selectionDraft, dirty: true, hasUnsavedChanges: true }),
+  setRegionEdit: (regionEdit) => set({ regionEdit }),
   markDirty: () => set({ dirty: true, hasUnsavedChanges: true }),
   markProjectSaved: () => set({ hasUnsavedChanges: false }),
   setSelectedModel: (selectedModel) => set({ selectedModel }),
@@ -289,6 +311,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     return {
       layers,
       selectionDraft,
+      regionEdit: null,
       workflow: 'viewing',
       activeTool: null,
       activeLayerId: null,
@@ -353,6 +376,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     activeLayerId: null,
     rectSelect: null,
     selectionDraft: null,
+    regionEdit: null,
     editSnapshot: null,
     dirty: false,
     hasUnsavedChanges: false,
