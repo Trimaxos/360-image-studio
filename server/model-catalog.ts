@@ -134,7 +134,7 @@ async function falOptions(): Promise<AiModelOption[]> {
     });
 
     if (!response.ok) {
-      throw new Error(`fal.ai catalog: HTTP ${response.status}`);
+      throw new Error(`Không tải được catalog fal.ai: HTTP ${response.status}`);
     }
 
     const data = await response.json() as any;

@@ -26,7 +26,7 @@ export default function ModelSelector({ disabled }: { disabled: boolean }) {
   return (
     <div className="model-selector-wrap">
       <select
-        aria-label="Model"
+        aria-label="Chọn model"
         value={selected ? `${selected.provider}:${selected.id}` : ''}
         disabled={disabled || !catalog}
         onChange={(event) => {
@@ -34,21 +34,21 @@ export default function ModelSelector({ disabled }: { disabled: boolean }) {
           setSelected(model ?? null);
         }}
       >
-        {!selected && <option value="">Model</option>}
+        {!selected && <option value="">Chọn model</option>}
         {catalog?.groups.map((group) => (
           <optgroup key={group.provider} label={group.label}>
             {group.models.map((model) => (
               <option key={model.id} value={`${model.provider}:${model.id}`} disabled={!model.enabled}>
                 {model.description ? `${model.description}: ` : ''}{model.displayName}
-                {model.hasMask === false ? ' (no mask)' : ''}
+                {model.hasMask === false ? ' (không mask)' : ''}
                 {model.disabledReason ? ` — ${model.disabledReason}` : ''}
               </option>
             ))}
           </optgroup>
         ))}
       </select>
-      {(error || catalog?.errors?.fal) && (
-        <button className="model-retry" onClick={() => void load()} title={error || catalog?.errors?.fal}>Retry</button>
+        {(error || catalog?.errors?.fal) && (
+        <button className="model-retry" onClick={() => void load()} title={error || catalog?.errors?.fal}>Thử lại</button>
       )}
     </div>
   );

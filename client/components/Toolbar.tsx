@@ -18,13 +18,13 @@ export default function Toolbar({ onExport, onSave, isSaving }: Props) {
     { key: 'fov' as const, label: 'FOV', min: 10, max: 120 },
   ];
   const tools = [
-    { id: 'rect' as const, icon: '▭', label: 'Rectangle Select', enabled: permission.rect },
+    { id: 'rect' as const, icon: '▭', label: 'Chọn hình chữ nhật', enabled: permission.rect },
   ];
 
   return (
     <aside className="sidebar-left">
       <section className="sidebar-section">
-        <div className="sidebar-section-title">Tools</div>
+        <div className="sidebar-section-title">Công cụ</div>
         {tools.map((tool) => (
           <button
             key={tool.id}
@@ -39,7 +39,7 @@ export default function Toolbar({ onExport, onSave, isSaving }: Props) {
       </section>
 
       <section className="sidebar-section">
-        <div className="sidebar-section-title">View Controls</div>
+        <div className="sidebar-section-title">Điều khiển góc nhìn</div>
         {controls.map((control) => (
           <label className="sidebar-view-row" key={control.key}>
             <span>{control.label}</span>
@@ -75,13 +75,13 @@ export default function Toolbar({ onExport, onSave, isSaving }: Props) {
       </section>
 
       <section className="sidebar-section project-section">
-        <div className="sidebar-section-title">Project</div>
+        <div className="sidebar-section-title">Dự án</div>
         <button className="sidebar-btn" disabled={!state.imagePath || isSaving} onClick={onSave} aria-busy={isSaving}>
           <span className="sidebar-btn-icon">{isSaving ? <span className="inline-spinner" /> : '💾'}</span>
-          <span>{isSaving ? 'Preparing Project…' : 'Save Project'}</span>
+          <span>{isSaving ? 'Đang chuẩn bị dự án…' : 'Lưu dự án'}</span>
         </button>
         <button className="sidebar-btn" disabled={!state.imagePath || !committed} onClick={onExport}>
-          <span className="sidebar-btn-icon">📤</span><span>Export Final</span>
+          <span className="sidebar-btn-icon">📤</span><span>Xuất ảnh</span>
         </button>
       </section>
     </aside>

@@ -7,8 +7,8 @@ export default function LayerPanel() {
 
   return (
     <aside className="layer-panel">
-      <div className="panel-header">
-        Layers <span className="layer-count">{state.layers.length} layer(s)</span>
+        <div className="panel-header">
+        Layer <span className="layer-count">{state.layers.length} layer</span>
       </div>
       {!sorted.length ? <p className="layer-empty">Chưa có chỉnh sửa nào</p> : (
         <div className="layer-list">
@@ -24,13 +24,13 @@ export default function LayerPanel() {
               onClick={() => { if (!locked) useProjectStore.setState({ activeLayerId: layer.id }); }}
             >
               <div className="layer-thumb">{layer.type === 'perspective' ? '360°' : '2D'}</div>
-              <div className="layer-info">
+                <div className="layer-info">
                 <div className="layer-name">{layer.name ?? `Layer ${layer.order}`}</div>
-                <div className="layer-meta">{layer.status ?? 'draft'} · {layer.tileCoords.w}×{layer.tileCoords.h}</div>
+                <div className="layer-meta">{(layer.status === 'committed' ? 'đã xác nhận' : layer.status === 'draft' ? 'bản nháp' : layer.status) ?? 'bản nháp'} · {layer.tileCoords.w}×{layer.tileCoords.h}</div>
               </div>
               <div className="layer-actions">
                 <button disabled={locked} className={layer.visible === false ? 'hidden' : 'visible'} onClick={(event) => { event.stopPropagation(); state.toggleLayerVisibility(layer.id); }} title="Ẩn/hiện">👁</button>
-                <button disabled={editingLayer} onClick={(event) => { event.stopPropagation(); state.openLayerEditor(layer.id); }} title={editingLayer ? 'Đang chỉnh sửa layer' : 'Edit'}>✎</button>
+                <button disabled={editingLayer} onClick={(event) => { event.stopPropagation(); state.openLayerEditor(layer.id); }} title={editingLayer ? 'Đang chỉnh sửa layer' : 'Sửa'}>✎</button>
                 <button disabled={locked} onClick={(event) => {
                   event.stopPropagation();
                   if (confirm(`Xóa Layer ${layer.order}?`)) state.removeLayer(layer.id);

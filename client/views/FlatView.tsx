@@ -47,7 +47,7 @@ export default function FlatView() {
         />
       )}
       {workflow === 'viewing' && (
-        <button className="edit-here-btn" onClick={() => enterRectSelect('flat')}>🔒 Edit Here</button>
+        <button className="edit-here-btn" onClick={() => enterRectSelect('flat')}>🔒 Chỉnh sửa tại đây</button>
       )}
       {workflow === 'rect-select' && <RectSelectionOverlay sourceView="flat" />}
     </div>

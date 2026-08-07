@@ -265,9 +265,9 @@ export default function CanvasEditor() {
       />
       <div className="canvas-toolbar">
         <button disabled={returningToView} onClick={back}>
-          {returningToView ? 'Applying…' : '← Back to View'}
+          {returningToView ? 'Đang áp dụng…' : '← Quay lại xem'}
         </button>
-        <span>{activeLayer ? `${activeLayer.tileCoords.w} × ${activeLayer.tileCoords.h}px` : 'Edit Canvas'}</span>
+        <span>{activeLayer ? `${activeLayer.tileCoords.w} × ${activeLayer.tileCoords.h}px` : 'Chỉnh sửa canvas'}</span>
         <div className="canvas-toolbar-actions">
           <button
             className={state.regionEdit ? 'active' : ''}
@@ -280,9 +280,9 @@ export default function CanvasEditor() {
           {state.regionEdit && (
             <button onClick={() => state.setRegionEdit(null)} title="Bỏ giới hạn vùng, quay lại sửa toàn bộ ảnh">✕ Bỏ vùng</button>
           )}
-          <button disabled={sourceStatus !== 'ready'} onClick={() => void downloadCanvas()}>Download Image</button>
-          <button disabled={sourceStatus !== 'ready'} onClick={() => void copyCanvas()}>Copy Image</button>
-          <button disabled={sourceStatus !== 'ready'} onClick={() => resultInputRef.current?.click()}>Import Result</button>
+          <button disabled={sourceStatus !== 'ready'} onClick={() => void downloadCanvas()}>Tải ảnh</button>
+          <button disabled={sourceStatus !== 'ready'} onClick={() => void copyCanvas()}>Sao chép ảnh</button>
+          <button disabled={sourceStatus !== 'ready'} onClick={() => resultInputRef.current?.click()}>Nhập kết quả</button>
         </div>
       </div>
       <div className="canvas-stage">
@@ -290,7 +290,7 @@ export default function CanvasEditor() {
         {sourceStatus === 'loading' && <div className="canvas-source-message">Đang tải vùng chỉnh sửa…</div>}
         {sourceStatus === 'error' && <div className="canvas-source-message error">{sourceError}</div>}
         {selectedVariant && (
-          <img className="selected-variant-preview" src={`data:image/png;base64,${selectedVariant.base64Result}`} alt="Selected result" />
+          <img className="selected-variant-preview" src={`data:image/png;base64,${selectedVariant.base64Result}`} alt="Kết quả đã chọn" />
         )}
         {state.regionEdit && imageTransform && !selectingRegion && (() => {
           const { points } = state.regionEdit;

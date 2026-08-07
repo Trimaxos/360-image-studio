@@ -40,7 +40,7 @@ export async function translatePrompt(text: string): Promise<{
   });
 
   if (!response.ok) {
-    throw new Error(`DeepSeek translate failed: ${response.status} ${response.statusText}`);
+    throw new Error(`Dịch DeepSeek thất bại: ${response.status} ${response.statusText}`);
   }
 
   const data = await response.json() as any;

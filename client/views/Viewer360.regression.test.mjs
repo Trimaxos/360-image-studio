@@ -43,7 +43,7 @@ test('updates the view FOV in degrees instead of zoom percentage', () => {
 });
 
 test('keeps file actions from crushing the top-bar tabs', () => {
-  assert.match(appSource, /<details className=["']file-menu["']/);
+  assert.match(appSource, /<details[^>]*className=["']file-menu["']/);
   assert.match(themeSource, /\.top-bar-tab\s*\{[^}]*white-space:\s*nowrap/s);
 });
 

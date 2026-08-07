@@ -50,16 +50,16 @@ export default function VariantGallery() {
   return (
     <div className="variant-gallery">
       <div className="variant-gallery-title">
-        Results ({variants.length + 1})
+        Kết quả ({variants.length + 1})
       </div>
       <div className="variant-gallery-list">
         <div className={`variant-card original ${!appliedVariant ? 'applied' : ''}`}>
           <div className="variant-thumb-wrapper" onClick={() => selectOriginalVariant(activeLayerId)}>
             {!appliedVariant && <span className="variant-badge">✓ ĐANG XEM</span>}
-            <img className="variant-thumb" src={originalUrl} alt="Original" />
+            <img className="variant-thumb" src={originalUrl} alt="Gốc" />
           </div>
           <div className="variant-meta">
-            <span className="variant-source">Original</span>
+            <span className="variant-source">Gốc</span>
             <span className="variant-size">
               {activeLayer.tileCoords.w}×{activeLayer.tileCoords.h}
             </span>
@@ -84,8 +84,8 @@ export default function VariantGallery() {
               <div className="variant-meta">
                 <span className="variant-source">
                   {variant.source === 'ai-generated'
-                    ? `AI: ${variant.modelId ?? 'unknown'}`
-                    : 'Imported'}
+                    ? `AI: ${variant.modelId ?? 'không rõ'}`
+                    : 'Đã nhập'}
                 </span>
                 <span className="variant-size">
                   {variant.width}×{variant.height}
@@ -96,14 +96,14 @@ export default function VariantGallery() {
                 <button
                   className="variant-action-btn"
                   onClick={() => setEditingVariantId(variant.id)}
-                  title="Xóa hoặc phục hồi vùng Result"
+                  title="Xóa hoặc phục hồi vùng kết quả"
                 >
-                  ✎ Edit
+                  ✎ Sửa
                 </button>
                 <button
                   className="variant-action-btn variant-delete"
                   onClick={() => handleDelete(variant.id)}
-                  title="Delete result"
+                  title="Xóa kết quả"
                 >
                   🗑
                 </button>

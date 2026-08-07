@@ -135,7 +135,7 @@ export default function PromptBar() {
         disabled={!permission.ai || generating || !prompt.trim() || !state.selectedModel}
         onClick={() => void generate()}
       >
-        {generating ? 'Generating…' : 'Generate'}
+        {generating ? 'Đang tạo…' : 'Tạo'}
       </button>
       {error && <span className="prompt-error" title={error}>⚠ {error}</span>}
     </div>

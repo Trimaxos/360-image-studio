@@ -269,7 +269,7 @@ export async function reprojectToEquirectangular(
   panorama: Size,
 ): Promise<Buffer> {
   const selection = layer.selection;
-  if (!selection) throw new Error(`Perspective layer ${layer.id} is missing selection projection data`);
+  if (!selection) throw new Error(`Layer perspective ${layer.id} thiếu dữ liệu projection của vùng chọn`);
 
   // Load source result + apply mask if present
   const { data: rawData, info } = await sharp(resultPath).ensureAlpha().raw().toBuffer({ resolveWithObject: true });

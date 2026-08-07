@@ -7,7 +7,7 @@ export function blobToBase64(blob: Blob): Promise<string> {
       // Strip data:...;base64, prefix
       resolve(result.split(',')[1]);
     };
-    reader.onerror = () => reject(new Error('Failed to read blob'));
+    reader.onerror = () => reject(new Error('Không đọc được dữ liệu ảnh'));
     reader.readAsDataURL(blob);
   });
 }

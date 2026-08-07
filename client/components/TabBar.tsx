@@ -14,14 +14,14 @@ export default function TabBar({ activeTab, onTabChange, disabled }: Props) {
         onClick={() => onTabChange('360')}
         disabled={disabled}
       >
-        🔄 360 View
+        🔄 Xem 360°
       </button>
       <button
         style={{ ...styles.tab, ...(activeTab === 'flat' ? styles.active : {}) }}
         onClick={() => onTabChange('flat')}
         disabled={disabled}
       >
-        🗺️ Flat View
+        🗺️ Xem phẳng
       </button>
     </div>
   );

@@ -53,7 +53,7 @@ const zipUpload = multer({
 projectRouter.post('/download', async (req, res) => {
   try {
     const { project } = req.body as { project: ProjectFile };
-    if (!project?.imagePath) return res.status(400).json({ error: 'project with imagePath is required' });
+    if (!project?.imagePath) return res.status(400).json({ error: 'Thiếu dự án hoặc đường dẫn ảnh' });
 
     await fs.access(project.imagePath);
 
@@ -132,7 +132,7 @@ projectRouter.post('/download', async (req, res) => {
 // Upload .360project (ZIP v3 or JSON v2) — extract, map paths, return project
 projectRouter.post('/upload-zip', zipUpload.single('project'), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: 'No project file provided' });
+    if (!req.file) return res.status(400).json({ error: 'Chưa chọn file dự án' });
 
     // Detect format: ZIP files start with "PK" magic bytes
     const fh = await fs.open(req.file.path, 'r');
@@ -147,14 +147,14 @@ projectRouter.post('/upload-zip', zipUpload.single('project'), async (req, res) 
       const project = JSON.parse(data) as Omit<ProjectFile, 'version'> & { version: number };
       if (project.version !== 2) {
         await fs.unlink(req.file.path).catch(() => undefined);
-        return res.status(400).json({ error: `Unsupported project version: ${project.version}` });
+        return res.status(400).json({ error: `Phiên bản dự án không hỗ trợ: ${project.version}` });
       }
       try {
         await fs.access(project.imagePath);
       } catch {
         await fs.unlink(req.file.path).catch(() => undefined);
         return res.status(400).json({
-          error: `Project references image that doesn't exist: ${project.imagePath}`,
+          error: `Dự án tham chiếu ảnh không tồn tại: ${project.imagePath}`,
         });
       }
       // v2 layers have no variants — migrate so export still composites them
@@ -180,7 +180,7 @@ projectRouter.post('/upload-zip', zipUpload.single('project'), async (req, res) 
       if (!resolved.startsWith(extractDir + path.sep) && resolved !== extractDir) {
         await fs.rm(extractDir, { recursive: true, force: true });
         await fs.unlink(req.file.path).catch(() => undefined);
-        return res.status(400).json({ error: `Invalid zip entry path: ${entry.entryName}` });
+        return res.status(400).json({ error: `Đường dẫn trong ZIP không hợp lệ: ${entry.entryName}` });
       }
     }
 
@@ -193,7 +193,7 @@ projectRouter.post('/upload-zip', zipUpload.single('project'), async (req, res) 
     if (project.version < 2 || project.version > 4) {
       await fs.rm(extractDir, { recursive: true, force: true });
       await fs.unlink(req.file.path).catch(() => undefined);
-      return res.status(400).json({ error: `Unsupported project version: ${project.version}` });
+      return res.status(400).json({ error: `Phiên bản dự án không hỗ trợ: ${project.version}` });
     }
 
     // Migrate legacy v2/v3 → v4: auto-create a default variant from the legacy resultImageId
@@ -207,7 +207,7 @@ projectRouter.post('/upload-zip', zipUpload.single('project'), async (req, res) 
     if (!origPath.startsWith(extractDir + path.sep) && origPath !== extractDir) {
       await fs.rm(extractDir, { recursive: true, force: true });
       await fs.unlink(req.file.path).catch(() => undefined);
-      return res.status(400).json({ error: 'Invalid imagePath in project.json' });
+      return res.status(400).json({ error: 'Đường dẫn ảnh trong project.json không hợp lệ' });
     }
     const origExt = path.extname(project.imagePath);
     const newOrigPath = path.join(CACHE_DIR, `original-${randomUUID()}${origExt}`);

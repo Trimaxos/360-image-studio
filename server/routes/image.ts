@@ -26,7 +26,7 @@ const upload = multer({
 imageRouter.post('/open', async (req, res) => {
   try {
     const { path } = req.body as ImageOpenRequest;
-    if (!path?.trim()) return res.status(400).json({ error: 'path is required' });
+    if (!path?.trim()) return res.status(400).json({ error: 'Thiếu đường dẫn ảnh' });
     const meta = await openImage(path);
     res.json(meta as ImageOpenResponse);
   } catch (err: any) {
@@ -38,7 +38,7 @@ imageRouter.post('/open', async (req, res) => {
 imageRouter.get('/serve', async (req, res) => {
   try {
     const { path, maxWidth } = req.query;
-    if (!path) return res.status(400).json({ error: 'path is required' });
+    if (!path) return res.status(400).json({ error: 'Thiếu đường dẫn ảnh' });
     const result = await serveImage(String(path), maxWidth ? Number(maxWidth) : undefined);
     res.type('image/png').send(result.buffer);
   } catch (err: any) {
@@ -50,7 +50,7 @@ imageRouter.get('/tile', async (req, res) => {
   try {
     const { path, x, y, w, h } = req.query;
     if (!path || x === undefined || y === undefined || w === undefined || h === undefined) {
-      return res.status(400).json({ error: 'path, x, y, w, h are required' });
+      return res.status(400).json({ error: 'Thiếu path, x, y, w hoặc h' });
     }
     const tile = await getTile(
       String(path),
@@ -68,7 +68,7 @@ imageRouter.get('/tile', async (req, res) => {
 imageRouter.post('/cache-result', async (req, res) => {
   try {
     const { base64Image } = req.body;
-    if (!base64Image) return res.status(400).json({ error: 'base64Image is required' });
+    if (!base64Image) return res.status(400).json({ error: 'Thiếu ảnh base64' });
     const buffer = Buffer.from(base64Image, 'base64');
     const hash = createHash('sha256').update(buffer).digest('hex');
     const cacheFile = path.join(CACHE_DIR, `${hash}.png`);
@@ -83,9 +83,9 @@ imageRouter.post('/cache-result', async (req, res) => {
 imageRouter.post('/perspective-render', async (req, res) => {
   try {
     const { imagePath, layers, viewPose, viewport, rect, mode } = req.body as PerspectiveRenderRequest;
-    if (!imagePath?.trim()) return res.status(400).json({ error: 'imagePath is required' });
-    if (!viewPose || viewPose.fov === undefined) return res.status(400).json({ error: 'viewPose with fov is required' });
-    if (!viewport?.width || !viewport?.height) return res.status(400).json({ error: 'viewport is required' });
+    if (!imagePath?.trim()) return res.status(400).json({ error: 'Thiếu đường dẫn ảnh' });
+    if (!viewPose || viewPose.fov === undefined) return res.status(400).json({ error: 'Thiếu viewPose hoặc fov' });
+    if (!viewport?.width || !viewport?.height) return res.status(400).json({ error: 'Thiếu kích thước viewport' });
 
     // Use full viewport rect for full-frame mode
     const effectiveRect = mode === 'full-frame'
@@ -140,7 +140,7 @@ imageRouter.post('/reproject', async (req, res) => {
   try {
     const { resultImageId, selection, imagePath, maskEnabled, maskData, visibilityMask } = req.body as ReprojectRequest;
     if (!resultImageId || !selection || !imagePath) {
-      return res.status(400).json({ error: 'resultImageId, selection, and imagePath are required' });
+      return res.status(400).json({ error: 'Thiếu resultImageId, selection hoặc imagePath' });
     }
 
     const resultPath = path.join(CACHE_DIR, `${resultImageId}.png`);
@@ -223,14 +223,14 @@ imageRouter.get('/cache/:id', async (req, res) => {
     const id = req.params.id;
     // Sanitize: only allow hex characters (SHA256 hash format)
     if (!/^[a-f0-9]{64}$/.test(id)) {
-      return res.status(400).json({ error: 'Invalid cache ID format' });
+      return res.status(400).json({ error: 'ID cache không hợp lệ' });
     }
     const cacheFile = path.join(CACHE_DIR, `${id}.png`);
     const buffer = await fs.readFile(cacheFile);
     res.type('image/png').send(buffer);
   } catch (err: any) {
     if (err.code === 'ENOENT') {
-      return res.status(404).json({ error: 'Cache file not found' });
+      return res.status(404).json({ error: 'Không tìm thấy file cache' });
     }
     res.status(500).json({ error: err.message });
   }
@@ -239,7 +239,7 @@ imageRouter.get('/cache/:id', async (req, res) => {
 // Upload ảnh từ browser — lưu vào cache dir, trả về path + metadata
 imageRouter.post('/upload', upload.single('image'), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: 'No image file provided' });
+    if (!req.file) return res.status(400).json({ error: 'Chưa chọn file ảnh' });
     const meta = await openImage(req.file.path);
     res.json({ ...meta, path: req.file.path, originalName: req.file.originalname });
   } catch (err: any) {
@@ -251,7 +251,7 @@ imageRouter.post('/export', async (req, res) => {
   try {
     const body = req.body as ExportRequest;
     if (!body.path || !body.outputPath) {
-      return res.status(400).json({ error: 'path and outputPath are required' });
+      return res.status(400).json({ error: 'Thiếu path hoặc outputPath' });
     }
     await exportImage(
       body.path, body.outputPath, body.format, body.quality,
@@ -265,7 +265,7 @@ imageRouter.post('/export', async (req, res) => {
 
 imageRouter.post('/preview', async (req, res) => {
   const { path: imagePath, layers } = req.body as Pick<ExportRequest, 'path' | 'layers'>;
-  if (!imagePath) return res.status(400).json({ error: 'path is required' });
+  if (!imagePath) return res.status(400).json({ error: 'Thiếu đường dẫn ảnh' });
   const previewPath = path.join(CACHE_DIR, `preview-${randomUUID()}.png`);
   try {
     await exportImage(

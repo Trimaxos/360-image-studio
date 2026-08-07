@@ -17,7 +17,7 @@ aiRouter.get('/models', async (_req, res) => {
 aiRouter.post('/translate', async (req, res) => {
   try {
     const { text } = req.body as TranslateRequest;
-    if (!text?.trim()) return res.status(400).json({ error: 'text is required' });
+    if (!text?.trim()) return res.status(400).json({ error: 'Vui lòng nhập nội dung cần dịch' });
     const result = await translatePrompt(text);
     res.json(result as TranslateResponse);
   } catch (err: any) {
@@ -29,7 +29,7 @@ aiRouter.post('/edit', async (req, res) => {
   try {
     const { provider, modelId, base64Image, base64Mask, hasRegionMask, prompt } = req.body as AiEditRequest;
     if (!provider || !modelId || !base64Image || !prompt) {
-      return res.status(400).json({ error: 'provider, modelId, base64Image, and prompt are required' });
+      return res.status(400).json({ error: 'Thiếu provider, modelId, base64Image hoặc prompt' });
     }
     const modelInfo = await getModelInfo(modelId);
     // Forward the mask whenever the model requires one structurally, OR when

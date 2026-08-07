@@ -8,9 +8,22 @@ import Toolbar from './components/Toolbar';
 import { downloadBlob } from './lib/canvas-exchange';
 import { api } from './lib/api';
 import { useProjectStore } from './stores/project';
+import type { WorkflowState } from './stores/workflow';
 import type { ProjectFile } from '../shared/types';
 import FlatView from './views/FlatView';
 import Viewer360 from './views/Viewer360';
+
+function workflowLabel(state: WorkflowState): string {
+  const labels: Record<WorkflowState, string> = {
+    empty: 'trống',
+    viewing: 'đang xem',
+    'rect-select': 'chọn vùng',
+    'canvas-edit': 'chỉnh sửa canvas',
+    generating: 'đang tạo',
+    'ai-review': 'xem kết quả AI',
+  };
+  return labels[state] ?? state;
+}
 
 function formatFileSize(bytes?: number) {
   if (!bytes) return '';
@@ -68,7 +81,7 @@ export default function App() {
       downloadBlob(zipBlob, `${base}.360project`);
       useProjectStore.getState().markProjectSaved();
     } catch (err: any) {
-      alert(`Save failed: ${err.message}`);
+      alert(`Lưu thất bại: ${err.message}`);
     } finally {
       saveInFlight.current = false;
       setIsSavingProject(false);
@@ -87,7 +100,7 @@ export default function App() {
       });
       setFileSize(meta.sizeBytes);
     } catch (err: any) {
-      alert(`Load failed: ${err.message}`);
+      alert(`Mở thất bại: ${err.message}`);
     }
   }, []);
 
@@ -108,23 +121,23 @@ export default function App() {
       <header className="top-bar">
         <span className="top-bar-logo"><strong>360</strong><span>ImageStudio</span></span>
         <nav className="top-bar-tabs">
-          <button className={`top-bar-tab ${activeTab === '360' ? 'active' : ''}`} disabled={state.workflow !== 'viewing'} onClick={() => setActiveTab('360')}>🌐 360 View</button>
-          <button className={`top-bar-tab ${activeTab === 'flat' ? 'active' : ''}`} disabled={state.workflow !== 'viewing'} onClick={() => setActiveTab('flat')}>📐 Flat View</button>
+          <button className={`top-bar-tab ${activeTab === '360' ? 'active' : ''}`} disabled={state.workflow !== 'viewing'} onClick={() => setActiveTab('360')}>🌐 Xem 360°</button>
+          <button className={`top-bar-tab ${activeTab === 'flat' ? 'active' : ''}`} disabled={state.workflow !== 'viewing'} onClick={() => setActiveTab('flat')}>📐 Xem phẳng</button>
         </nav>
         <details ref={fileMenuRef} className="file-menu">
-          <summary>☰ File</summary>
+          <summary>☰ Tệp</summary>
           <div className="file-menu-popover">
-            <button onClick={() => { closeFileMenu(); imageInput.current?.click(); }}>📂 Open Image</button>
-            <button onClick={() => { closeFileMenu(); projectInput.current?.click(); }}>📋 Load Project</button>
+            <button onClick={() => { closeFileMenu(); imageInput.current?.click(); }}>📂 Mở ảnh</button>
+            <button onClick={() => { closeFileMenu(); projectInput.current?.click(); }}>📋 Mở dự án</button>
             <button disabled={!state.imagePath || isSavingProject} onClick={() => { closeFileMenu(); void saveProject(); }}>
-              {isSavingProject ? <><span className="inline-spinner" /> Preparing Project…</> : <>💾 Download Project</>}
+              {isSavingProject ? <><span className="inline-spinner" /> Đang chuẩn bị dự án…</> : <>💾 Tải dự án</>}
             </button>
-            <button disabled={!state.imagePath || !committed} onClick={() => { closeFileMenu(); setExportOpen(true); }}>📤 Export Final</button>
-            <button disabled={!state.imagePath} onClick={() => { closeFileMenu(); state.reset(); }}>↻ New</button>
+            <button disabled={!state.imagePath || !committed} onClick={() => { closeFileMenu(); setExportOpen(true); }}>📤 Xuất ảnh</button>
+            <button disabled={!state.imagePath} onClick={() => { closeFileMenu(); state.reset(); }}>↻ Mới</button>
           </div>
         </details>
         {fileName && <span className="top-bar-file"><strong>{fileName}</strong> · {state.imageWidth} × {state.imageHeight} {fileSize ? `· ${formatFileSize(fileSize)}` : ''}</span>}
-        <button className="export-final-btn" disabled={!state.imagePath || !committed} onClick={() => setExportOpen(true)}>Export Final</button>
+        <button className="export-final-btn" disabled={!state.imagePath || !committed} onClick={() => setExportOpen(true)}>Xuất ảnh</button>
       </header>
 
       <main className="workspace">
@@ -140,14 +153,14 @@ export default function App() {
       </main>
       <PromptBar />
       <footer className="status-bar">
-        <span>{fileName ? `${fileName} — ${state.layers.length} layer(s)` : 'Chưa mở ảnh'}</span>
-        <span>{state.workflow}</span>
+        <span>{fileName ? `${fileName} — ${state.layers.length} layer` : 'Chưa mở ảnh'}</span>
+        <span>{workflowLabel(state.workflow)}</span>
       </footer>
       <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} />
       {isSavingProject && (
         <div className="project-save-progress" role="status" aria-live="polite">
           <span className="inline-spinner" />
-          <span><strong>Đang chuẩn bị project…</strong><small>Đang đóng gói ảnh và dữ liệu, vui lòng chờ.</small></span>
+          <span><strong>Đang chuẩn bị dự án…</strong><small>Đang đóng gói ảnh và dữ liệu, vui lòng chờ.</small></span>
         </div>
       )}
     </div>

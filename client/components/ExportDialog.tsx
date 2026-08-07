@@ -122,23 +122,23 @@ export default function ExportDialog({ open, onClose }: Props) {
     <>
       <div className="modal-overlay">
         <div className="modal-box" style={{ width: 440 }}>
-          <h2>Export Image</h2>
+          <h2>Xuất ảnh</h2>
 
           <div className="modal-row">
-            <label>Format:</label>
+            <label>Định dạng:</label>
             <select value={format} onChange={(e) => setFormat(e.target.value as any)}>
               {FORMATS.map((f) => <option key={f} value={f}>{f.toUpperCase()}</option>)}
             </select>
           </div>
 
           <div className="modal-row">
-            <label>Quality: {quality}%</label>
+            <label>Chất lượng: {quality}%</label>
             <input type="range" min={1} max={100} value={quality}
               onChange={(e) => setQuality(Number(e.target.value))} />
           </div>
 
           <div className="modal-row">
-            <label>Save to:</label>
+            <label>Lưu vào:</label>
             <input
               value={outputDir}
               onChange={(e) => setOutputDir(e.target.value)}
@@ -153,7 +153,7 @@ export default function ExportDialog({ open, onClose }: Props) {
           </div>
 
           <div className="modal-row">
-            <label>File name:</label>
+            <label>Tên tệp:</label>
             <input
               value={filename}
               onChange={(e) => setFilename(e.target.value)}
@@ -171,21 +171,21 @@ export default function ExportDialog({ open, onClose }: Props) {
           {done ? (
             <div style={{ marginTop: 16 }}>
               <p style={{ color: '#4caf50', fontSize: 13, marginBottom: 12 }}>
-                ✅ Exported to {fullPath()}
+                ✅ Đã xuất ra {fullPath()}
               </p>
               <div className="modal-actions">
-                <button className="modal-btn modal-btn-primary" onClick={close}>Close</button>
+                <button className="modal-btn modal-btn-primary" onClick={close}>Đóng</button>
               </div>
             </div>
           ) : (
             <div className="modal-actions">
-              <button className="modal-btn modal-btn-secondary" onClick={close}>Cancel</button>
+              <button className="modal-btn modal-btn-secondary" onClick={close}>Hủy</button>
               <button
                 className="modal-btn modal-btn-primary"
                 disabled={exporting || !outputDir.trim()}
                 onClick={() => void handleExport()}
               >
-                {exporting ? '⏳ Exporting...' : 'Export'}
+                {exporting ? '⏳ Đang xuất...' : 'Xuất'}
               </button>
             </div>
           )}
@@ -198,7 +198,7 @@ export default function ExportDialog({ open, onClose }: Props) {
       {browseOpen && (
         <div className="modal-overlay" style={{ zIndex: 1001 }}>
           <div className="modal-box" style={{ width: 480, maxHeight: '80vh', overflow: 'auto' }}>
-            <h2>Select Directory</h2>
+            <h2>Chọn thư mục</h2>
             <div style={{ marginBottom: 12 }}>
               <button
                 className="modal-btn modal-btn-secondary"
@@ -206,7 +206,7 @@ export default function ExportDialog({ open, onClose }: Props) {
                 onClick={() => browseParent && navigateTo(browseParent)}
                 style={{ marginRight: 8 }}
               >
-                ⬆ Up
+                ⬆ Lên
               </button>
               <span style={{ fontSize: 12, color: '#ccc', wordBreak: 'break-all' }}>{browsePath}</span>
             </div>
@@ -232,12 +232,12 @@ export default function ExportDialog({ open, onClose }: Props) {
                 </div>
               ))}
               {browseDirs.length === 0 && (
-                <p style={{ color: '#888', fontSize: 12, fontStyle: 'italic', padding: 8 }}>No subdirectories</p>
+                <p style={{ color: '#888', fontSize: 12, fontStyle: 'italic', padding: 8 }}>Không có thư mục con</p>
               )}
             </div>
             <div className="modal-actions">
-              <button className="modal-btn modal-btn-secondary" onClick={() => setBrowseOpen(false)}>Cancel</button>
-              <button className="modal-btn modal-btn-primary" onClick={selectDir}>Select "{browsePath.split('/').pop()}"</button>
+              <button className="modal-btn modal-btn-secondary" onClick={() => setBrowseOpen(false)}>Hủy</button>
+              <button className="modal-btn modal-btn-primary" onClick={selectDir}>Chọn "{browsePath.split('/').pop()}"</button>
             </div>
           </div>
         </div>

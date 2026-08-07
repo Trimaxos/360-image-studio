@@ -14,11 +14,11 @@ export async function openImage(imagePath: string): Promise<ImageMeta> {
   const stat = await fs.stat(imagePath);
 
   if (!metadata.width || !metadata.height) {
-    throw new Error(`Cannot read image dimensions: ${imagePath}`);
+    throw new Error(`Không đọc được kích thước ảnh: ${imagePath}`);
   }
 
   if (metadata.width > 16000 || metadata.height > 8000) {
-    throw new Error(`Image too large: ${metadata.width}x${metadata.height}. Max: 16000x8000`);
+    throw new Error(`Ảnh quá lớn: ${metadata.width}x${metadata.height}. Tối đa: 16000x8000`);
   }
 
   const formatMap: Record<string, ImageMeta['format']> = {

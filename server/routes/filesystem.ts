@@ -15,12 +15,12 @@ filesystemRouter.get('/browse', async (req, res) => {
       (root) => resolved === root || resolved.startsWith(root + path.sep),
     );
     if (!isAllowed) {
-      return res.status(403).json({ error: 'Access denied: path outside allowed directories' });
+      return res.status(403).json({ error: 'Từ chối truy cập: đường dẫn nằm ngoài thư mục cho phép' });
     }
 
     const stat = await fs.stat(resolved);
     if (!stat.isDirectory()) {
-      return res.status(400).json({ error: 'Path is not a directory' });
+      return res.status(400).json({ error: 'Đường dẫn không phải thư mục' });
     }
 
     const entries = await fs.readdir(resolved, { withFileTypes: true });
@@ -41,10 +41,10 @@ filesystemRouter.get('/browse', async (req, res) => {
     });
   } catch (err: any) {
     if (err.code === 'ENOENT' || err.code === 'ENOTDIR') {
-      return res.status(404).json({ error: `Directory not found: ${err.path || ''}` });
+      return res.status(404).json({ error: `Không tìm thấy thư mục: ${err.path || ''}` });
     }
     if (err.code === 'EACCES') {
-      return res.status(403).json({ error: 'Permission denied' });
+      return res.status(403).json({ error: 'Không có quyền truy cập' });
     }
     res.status(500).json({ error: err.message });
   }

@@ -131,9 +131,9 @@ export default function RectSelectionOverlay({
         <span>{Math.round(rect.width)} × {Math.round(rect.height)}</span>
       </div>}
       <div className="rect-actions" onPointerDown={(event) => event.stopPropagation()}>
-        <button disabled={applying} onClick={() => state.leaveCanvas('discard')}>Cancel</button>
-        <button disabled={applying} onClick={() => void apply('full-frame')}>Full Frame</button>
-        <button className="primary" disabled={!hasRect || applying} onClick={() => void apply('free-select')}>{applying ? 'Đang chuẩn bị…' : 'Apply Rect'}</button>
+        <button disabled={applying} onClick={() => state.leaveCanvas('discard')}>Hủy</button>
+        <button disabled={applying} onClick={() => void apply('full-frame')}>Toàn khung</button>
+        <button className="primary" disabled={!hasRect || applying} onClick={() => void apply('free-select')}>{applying ? 'Đang chuẩn bị…' : 'Áp dụng vùng chọn'}</button>
       </div>
       {applying && (
         <div className="rect-apply-progress" role="status" aria-live="polite">

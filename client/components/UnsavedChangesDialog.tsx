@@ -12,10 +12,10 @@ export default function UnsavedChangesDialog(props: {
         <h3>Lưu trạng thái chỉnh sửa?</h3>
         <p>Vùng chọn, mask và prompt đã thay đổi. Các phiên bản AI chưa Apply sẽ được dọn khi quay lại view.</p>
         <div className="dialog-actions">
-          <button disabled={saving} onClick={props.onCancel}>Cancel</button>
-          <button disabled={saving} onClick={props.onDiscard}>Don&apos;t Save</button>
+          <button disabled={saving} onClick={props.onCancel}>Hủy</button>
+          <button disabled={saving} onClick={props.onDiscard}>Không lưu</button>
           <button className="primary" disabled={saving} onClick={props.onSave}>
-            {saving ? <><span className="inline-spinner" /> Đang lưu…</> : 'Save'}
+            {saving ? <><span className="inline-spinner" /> Đang lưu…</> : 'Lưu'}
           </button>
         </div>
       </div>

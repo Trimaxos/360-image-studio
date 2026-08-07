@@ -155,7 +155,7 @@ class FalProvider implements AiProvider {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(180_000),
     });
-    if (!response.ok) throw new Error(`fal.ai error: ${response.status} ${await response.text()}`);
+    if (!response.ok) throw new Error(`Lỗi fal.ai: ${response.status} ${await response.text()}`);
     const data = await response.json() as any;
     const resultUrl = data.images?.[0]?.url ?? data.image?.url ?? data.url;
     if (!resultUrl) throw new Error('fal.ai không trả về ảnh');
@@ -181,7 +181,7 @@ export function getProviderFor(
   maskRequired?: boolean,
   isRegionEdit?: boolean,
 ): AiProvider {
-  if (provider !== 'fal') throw new Error(`Unsupported AI provider: ${provider}`);
+  if (provider !== 'fal') throw new Error(`Provider AI không được hỗ trợ: ${provider}`);
   return new FalProvider(modelId, inputProperties, endpointId, extraParams, maskRequired, isRegionEdit);
 }
 
