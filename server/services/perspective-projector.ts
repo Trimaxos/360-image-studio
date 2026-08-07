@@ -186,6 +186,39 @@ export function lanczos2Weight(x: number): number {
   return s * Math.sin(pix / 2) / (pix / 2);  // sinc(x) · sinc(x/2)
 }
 
+/**
+ * Test whether a world-space pole direction (0, ±1, 0) projects inside the
+ * perspective view frustum after inverse rotation.  Used to detect when the
+ * 12-edge-sample heuristic misses the true y-extent because the pole lies
+ * inside the view (not on the edges).
+ */
+export function isPoleVisible(
+  poleDir: [number, number, number],
+  cosYaw: number, sinYaw: number,
+  cosPitch: number, sinPitch: number,
+  cosRoll: number, sinRoll: number,
+  aspect: number, tanHalfFov: number,
+): boolean {
+  // Inverse-rotate world direction → camera space (mirrors main loop lines 372-383)
+  const cx1 = cosYaw * poleDir[0] - sinYaw * poleDir[2];
+  const cz1 = sinYaw * poleDir[0] + cosYaw * poleDir[2];
+  const cy2 = cosPitch * poleDir[1] - sinPitch * cz1;
+  const cz2 = sinPitch * poleDir[1] + cosPitch * cz1;
+  const cx3 = cosRoll * cx1 + sinRoll * cy2;
+  const cy3 = -sinRoll * cx1 + cosRoll * cy2;
+  const cz3 = cz2;
+
+  if (cz3 <= 0) return false;
+  const ndcX = cx3 / (cz3 * aspect * tanHalfFov);
+  const ndcY = cy3 / (cz3 * tanHalfFov);
+  return Math.abs(ndcX) <= 1 && Math.abs(ndcY) <= 1;
+}
+
+/** cos(lat) threshold below which the gap-detection x-range heuristic is
+ *  unreliable and we fall back to iterating the full panorama width.
+ *  0.02 ≈ within 1.15° of the pole (cos(88.85°) ≈ 0.02). */
+const POLE_COS_THRESHOLD = 0.02;
+
 /** Sample source image at subpixel (x,y) using Lanczos2 (4×4 = 16 samples).
  *  x wraps horizontally (equirectangular), y clamps vertically. */
 function sampleLanczos2(
@@ -307,6 +340,19 @@ export async function reprojectToEquirectangular(
   yMin = Math.max(0, Math.floor(yMin) - pad);
   yMax = Math.min(panoH - 1, Math.ceil(yMax) + pad);
 
+  // When a pole is inside the view frustum the 12 edge-sample heuristic
+  // misses it because the pole always lies at the view CENTER, not on the
+  // edges.  Hugin solves this with a full miniature render; we solve it
+  // with an explicit pole-visibility check (see isPoleVisible above).
+  const northPoleVisible = isPoleVisible(
+    [0, 1, 0], cosYaw, sinYaw, cosPitch, sinPitch, cosRoll, sinRoll, aspect, tanHalfFov,
+  );
+  const southPoleVisible = isPoleVisible(
+    [0, -1, 0], cosYaw, sinYaw, cosPitch, sinPitch, cosRoll, sinRoll, aspect, tanHalfFov,
+  );
+  if (northPoleVisible) yMin = 0;
+  if (southPoleVisible) yMax = panoH - 1;
+
   // Detect x-wrapping from projected x values.
   // The largest gap between consecutive sorted xs is the UNVIEWED area.
   // The VIEWED area is its complement — either one contiguous range or two wrapping ranges.
@@ -356,7 +402,15 @@ export async function reprojectToEquirectangular(
     const cosLat = Math.cos(lat);
     const sinLat = Math.sin(lat);
 
-    for (const range of xRanges) {
+    // Gap detection is unreliable where cos(lat) ≈ 0 because all longitudes
+    // map to nearly the same world direction.  Fall back to full width so
+    // near-pole rows are fully covered (the NDC test below correctly skips
+    // out-of-view columns).
+    const effectiveRanges = cosLat < POLE_COS_THRESHOLD
+      ? [{ start: 0, end: panoW - 1 }]
+      : xRanges;
+
+    for (const range of effectiveRanges) {
       for (let tx = range.start; tx <= range.end; tx++) {
         const wrappedTx = ((tx % panoW) + panoW) % panoW;
 

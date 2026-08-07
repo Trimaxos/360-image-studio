@@ -8,3 +8,4 @@ dist/
 models/*.gguf
 models/flux-fill-base/
 artifacts/*.oci.tar
+.codegraph/

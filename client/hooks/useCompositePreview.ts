@@ -7,7 +7,10 @@ export function useCompositePreview(): string | null {
   const layers = useProjectStore((state) => state.layers);
   const [url, setUrl] = useState<string | null>(null);
   const reviewKey = useMemo(
-    () => layers.map((layer) => `${layer.id}:${layer.visible}:${layer.resultImageId}:${layer.status}:${layer.equirectImageId}`).join('|'),
+    () => layers.map((layer) => {
+      const applied = (layer.variants ?? []).find(v => v.applied);
+      return `${layer.id}:${layer.visible}:${layer.resultImageId}:${layer.status}:${layer.equirectImageId}:v:${applied?.equirectImageId ?? ''}:m:${applied?.visibilityMask?.base64Mask ? '1' : '0'}`;
+    }).join('|'),
     [layers],
   );
 

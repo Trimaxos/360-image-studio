@@ -1,6 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { projectScreenPoint, calcPerspectiveResolution, lanczos2Weight } from './perspective-projector';
+import { projectScreenPoint, calcPerspectiveResolution, lanczos2Weight, isPoleVisible } from './perspective-projector';
+
+const { cos, sin, tan } = Math;
+const radians = (d: number) => d * Math.PI / 180;
+
+function poleVisible(poleSign: 1 | -1, yaw: number, pitch: number, roll: number, fov: number): boolean {
+  return isPoleVisible(
+    [0, poleSign, 0],
+    cos(radians(yaw)), sin(radians(yaw)),
+    cos(radians(pitch)), sin(radians(pitch)),
+    cos(radians(roll)), sin(radians(roll)),
+    1, // aspect (square viewport for simple tests)
+    tan(radians(fov) / 2),
+  );
+}
 
 test('center of a yaw zero view maps to panorama center', () => {
   const point = projectScreenPoint(
@@ -121,4 +135,41 @@ test('lanczos2Weight decays from origin', () => {
   const w2 = lanczos2Weight(1.6);
   assert.ok(w1 < w0);
   assert.ok(Math.abs(w2) < Math.abs(w1));
+});
+
+// ---- isPoleVisible tests ----
+
+test('isPoleVisible: pitch=90° fov=90° → north pole visible, south not', () => {
+  assert.equal(poleVisible(1, 0, 90, 0, 90), true);
+  assert.equal(poleVisible(-1, 0, 90, 0, 90), false);
+});
+
+test('isPoleVisible: pitch=-90° fov=90° → south pole visible, north not', () => {
+  assert.equal(poleVisible(-1, 0, -90, 0, 90), true);
+  assert.equal(poleVisible(1, 0, -90, 0, 90), false);
+});
+
+test('isPoleVisible: pitch=0° fov=70° → neither pole visible', () => {
+  assert.equal(poleVisible(1, 0, 0, 0, 70), false);
+  assert.equal(poleVisible(-1, 0, 0, 0, 70), false);
+});
+
+test('isPoleVisible: pitch=45° fov=120° → north pole visible (pole within 60° half-fov)', () => {
+  // Pole at 45° from center, half-FOV = 60° → should be visible
+  assert.equal(poleVisible(1, 0, 45, 0, 120), true);
+});
+
+test('isPoleVisible: pitch=0° fov=179° → neither pole visible (pole at 90° > 89.5° half-fov)', () => {
+  // Half-FOV = 89.5°. The pole is perpendicular to the view axis at 90°,
+  // just outside the frustum edge. Visible only with FOV > 180°.
+  assert.equal(poleVisible(1, 0, 0, 0, 179), false);
+  assert.equal(poleVisible(-1, 0, 0, 0, 179), false);
+});
+
+test('isPoleVisible: pole still visible after yaw rotation when pitch=90°', () => {
+  // When the camera points straight at the pole (pitch=90°), the view
+  // direction aligns with the world Y axis.  Yaw rotation (around Y)
+  // therefore does not change the view center — the north pole stays
+  // visible regardless of yaw.
+  assert.equal(poleVisible(1, 180, 90, 0, 90), true);
 });

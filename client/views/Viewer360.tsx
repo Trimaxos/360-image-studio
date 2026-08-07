@@ -103,9 +103,13 @@ export default function Viewer360() {
 
     // Add/update meshes for current perspective layers
     for (const layer of layers) {
-      if (layer.type !== 'perspective' || !layer.equirectImageId) continue;
+      // Prefer the applied variant's equirectImageId — the layer-level field
+      // may be stale when the selected variant hasn't been reprojected yet.
+      const appliedVariant = (layer.variants ?? []).find(v => v.applied);
+      const equirectId = appliedVariant?.equirectImageId ?? layer.equirectImageId;
+      if (layer.type !== 'perspective' || !equirectId) continue;
 
-      const textureUrl = api.image.cacheUrl(layer.equirectImageId);
+      const textureUrl = api.image.cacheUrl(equirectId);
       let mesh = overlayMeshesRef.current.get(layer.id);
 
       // Recreate mesh when texture URL changes (e.g. mask toggle triggers re-reproject)
