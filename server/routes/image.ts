@@ -158,7 +158,7 @@ imageRouter.post('/reproject', async (req, res) => {
       ? createHash('sha256').update(visibilityMask.base64Mask).digest('hex')
       : '';
     const reprojectionKey = createHash('sha256').update(JSON.stringify({
-      version: 2,
+      version: 3,
       resultImageId,
       selection,
       panoramaSize,
