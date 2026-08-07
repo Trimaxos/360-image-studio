@@ -214,10 +214,12 @@ export function isPoleVisible(
   return Math.abs(ndcX) <= 1 && Math.abs(ndcY) <= 1;
 }
 
-/** cos(lat) threshold below which the gap-detection x-range heuristic is
- *  unreliable and we fall back to iterating the full panorama width.
- *  0.02 ≈ within 1.15° of the pole (cos(88.85°) ≈ 0.02). */
-const POLE_COS_THRESHOLD = 0.02;
+// Hugin-style conservative coverage: when the view contains a pole the
+// edge-sample gap-detection heuristic is unreliable — the visible x-range
+// broadens near the pole well beyond what the edge samples capture (Hugin
+// abandoned edge-tracing for exactly this reason).  We fall back to
+// iterating the full panorama width and let the per-pixel NDC test reject
+// out-of-view columns — correct, simple, and still fast (~50-100 ms).
 
 /** Sample source image at subpixel (x,y) using Lanczos2 (4×4 = 16 samples).
  *  x wraps horizontally (equirectangular), y clamps vertically. */
@@ -402,11 +404,11 @@ export async function reprojectToEquirectangular(
     const cosLat = Math.cos(lat);
     const sinLat = Math.sin(lat);
 
-    // Gap detection is unreliable where cos(lat) ≈ 0 because all longitudes
-    // map to nearly the same world direction.  Fall back to full width so
-    // near-pole rows are fully covered (the NDC test below correctly skips
-    // out-of-view columns).
-    const effectiveRanges = cosLat < POLE_COS_THRESHOLD
+    // When a pole is inside the view frustum the edge-sample gap-detection
+    // xRanges are too narrow — the visible longitude span broadens as we
+    // approach the pole (Hugin-style: iterate full width, let NDC cull).
+    const poleInView = northPoleVisible || southPoleVisible;
+    const effectiveRanges = poleInView
       ? [{ start: 0, end: panoW - 1 }]
       : xRanges;
 

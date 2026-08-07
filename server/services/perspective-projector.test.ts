@@ -173,3 +173,19 @@ test('isPoleVisible: pole still visible after yaw rotation when pitch=90°', () 
   // visible regardless of yaw.
   assert.equal(poleVisible(1, 180, 90, 0, 90), true);
 });
+
+test('isPoleVisible: pitch=-60 fov=90 - south pole visible, north not (regression for near-pole gap bug)', () => {
+  // This is the exact case from the bug: looking down at -60 with a 90 FOV
+  // the south pole is well inside the frustum (at NDC 0, -0.577, 0.423 from edge).
+  // North pole is behind the camera.
+  assert.equal(poleVisible(-1, 0, -60, 0, 90), true);
+  assert.equal(poleVisible(1, 0, -60, 0, 90), false);
+});
+
+test('isPoleVisible: non-pole view - regression check that normal views are unaffected', () => {
+  // Typical viewing angles: looking at the horizon, neither pole visible.
+  assert.equal(poleVisible(1, 0, 0, 0, 70), false);
+  assert.equal(poleVisible(-1, 0, 0, 0, 70), false);
+  assert.equal(poleVisible(1, 45, 10, 0, 50), false);
+  assert.equal(poleVisible(-1, 45, 10, 0, 50), false);
+});
