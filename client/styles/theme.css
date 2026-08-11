@@ -48,6 +48,37 @@ html, body, #root {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
+/* ===== Login ===== */
+.login-screen, .login-loading {
+  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(circle at top, #173b68 0, var(--bg) 55%);
+}
+.login-loading { gap: 10px; color: var(--text2); }
+.login-dialog {
+  width: min(400px, calc(100% - 32px)); padding: 32px; border: 1px solid var(--border);
+  border-radius: 14px; background: rgba(22, 33, 62, .98); box-shadow: 0 24px 70px rgba(0, 0, 0, .45);
+}
+.login-brand { margin-bottom: 24px; font-size: 18px; font-weight: 700; }
+.login-brand strong { color: var(--accent); }
+.login-brand span { color: var(--text2); font-weight: 400; }
+.login-dialog h1 { margin-bottom: 8px; font-size: 24px; }
+.login-dialog > p { margin-bottom: 24px; color: var(--text2); font-size: 14px; }
+.login-dialog label { display: grid; gap: 7px; margin-bottom: 16px; color: #ccc; font-size: 13px; font-weight: 600; }
+.login-dialog input {
+  width: 100%; padding: 11px 12px; border: 1px solid var(--border); border-radius: 7px;
+  outline: none; background: var(--bg); color: var(--text); font-size: 14px;
+}
+.login-dialog input:focus { border-color: var(--accent); }
+.login-dialog button {
+  width: 100%; margin-top: 6px; padding: 11px; border: 0; border-radius: 7px;
+  background: var(--accent); color: #fff; cursor: pointer; font-size: 14px; font-weight: 700;
+}
+.login-dialog button:disabled { cursor: wait; opacity: .65; }
+.login-error {
+  margin: -3px 0 12px; padding: 9px 10px; border-radius: 6px;
+  background: rgba(233, 69, 96, .14); color: #ff9bac; font-size: 13px;
+}
+
 .placeholder {
   display: flex;
   align-items: center;
@@ -125,6 +156,21 @@ html, body, #root {
 .top-bar-file .filesize {
   color: #666;
   margin-left: 8px;
+}
+.logout-btn {
+  margin-left: auto;
+  padding: 7px 11px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text2);
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.logout-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
 }
 
 .file-menu {

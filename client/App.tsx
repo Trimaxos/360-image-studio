@@ -11,6 +11,7 @@ import { useProjectStore } from './stores/project';
 import type { ProjectFile } from '../shared/types';
 import FlatView from './views/FlatView';
 import Viewer360 from './views/Viewer360';
+import { useAuth } from './components/LoginGate';
 
 function formatFileSize(bytes?: number) {
   if (!bytes) return '';
@@ -19,6 +20,7 @@ function formatFileSize(bytes?: number) {
 }
 
 export default function App() {
+  const { logout } = useAuth();
   const state = useProjectStore();
   const [activeTab, setActiveTab] = useState<'360' | 'flat'>('360');
   const [exportOpen, setExportOpen] = useState(false);
@@ -111,7 +113,7 @@ export default function App() {
           <button className={`top-bar-tab ${activeTab === '360' ? 'active' : ''}`} disabled={state.workflow !== 'viewing'} onClick={() => setActiveTab('360')}>🌐 360 View</button>
           <button className={`top-bar-tab ${activeTab === 'flat' ? 'active' : ''}`} disabled={state.workflow !== 'viewing'} onClick={() => setActiveTab('flat')}>📐 Flat View</button>
         </nav>
-        <details ref={fileMenuRef} className="file-menu">
+        <details className="file-menu" ref={fileMenuRef}>
           <summary>☰ File</summary>
           <div className="file-menu-popover">
             <button onClick={() => { closeFileMenu(); imageInput.current?.click(); }}>📂 Open Image</button>
@@ -125,6 +127,7 @@ export default function App() {
         </details>
         {fileName && <span className="top-bar-file"><strong>{fileName}</strong> · {state.imageWidth} × {state.imageHeight} {fileSize ? `· ${formatFileSize(fileSize)}` : ''}</span>}
         <button className="export-final-btn" disabled={!state.imagePath || !committed} onClick={() => setExportOpen(true)}>Export Final</button>
+        <button className="logout-btn" onClick={() => void logout()}>Đăng xuất</button>
       </header>
 
       <main className="workspace">

@@ -3,7 +3,9 @@ import path from 'path';
 import fs from 'fs/promises';
 import type { ImageMeta, Horizon, Layer } from '../../shared/types';
 
-export const CACHE_DIR = path.join(process.env.HOME || '/tmp', '.cache', '360-image-studio');
+export const CACHE_DIR = process.env.CACHE_DIR
+  ? path.resolve(process.env.CACHE_DIR)
+  : path.join(process.env.HOME || '/tmp', '.cache', '360-image-studio');
 
 async function ensureCacheDir() {
   await fs.mkdir(CACHE_DIR, { recursive: true });

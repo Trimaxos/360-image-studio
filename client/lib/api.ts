@@ -22,6 +22,12 @@ async function request<T>(method: string, url: string, body?: any): Promise<T> {
 }
 
 export const api = {
+  auth: {
+    status: () => request<{ authenticated: boolean }>('GET', '/auth/status'),
+    login: (username: string, password: string) =>
+      request<{ authenticated: boolean }>('POST', '/auth/login', { username, password }),
+    logout: () => request<{ authenticated: boolean }>('POST', '/auth/logout'),
+  },
   image: {
     open: (path: string) =>
       request<any>('POST', '/image/open', { path }),
