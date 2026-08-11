@@ -28,9 +28,13 @@ function sessionFrom(req: Request) {
   return cookie ? decodeURIComponent(cookie.slice(COOKIE_NAME.length + 1)) : '';
 }
 
-function sessionCookie(value: string, maxAge: number) {
-  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
-  return `${COOKIE_NAME}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${Math.floor(maxAge / 1000)}${secure}`;
+function sessionCookie(value: string, maxAge: number, secure: boolean) {
+  const secureAttribute = secure ? '; Secure' : '';
+  return `${COOKIE_NAME}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${Math.floor(maxAge / 1000)}${secureAttribute}`;
+}
+
+function isHttps(req: Request) {
+  return req.secure || req.headers['x-forwarded-proto'] === 'https';
 }
 
 export const authRouter = Router();
@@ -50,13 +54,13 @@ authRouter.post('/login', (req, res) => {
 
   const sessionId = randomBytes(32).toString('hex');
   sessions.add(sessionId);
-  res.setHeader('Set-Cookie', sessionCookie(sessionId, SESSION_MAX_AGE_MS));
+  res.setHeader('Set-Cookie', sessionCookie(sessionId, SESSION_MAX_AGE_MS, isHttps(req)));
   res.json({ authenticated: true });
 });
 
 authRouter.post('/logout', (req, res) => {
   sessions.delete(sessionFrom(req));
-  res.setHeader('Set-Cookie', sessionCookie('', 0));
+  res.setHeader('Set-Cookie', sessionCookie('', 0, isHttps(req)));
   res.json({ authenticated: false });
 });
 

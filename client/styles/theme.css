@@ -1653,6 +1653,55 @@ html, body, #root {
   color: #aebdd2;
 }
 
+.project-load-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(7, 13, 30, .72);
+  backdrop-filter: blur(3px);
+}
+
+.project-load-dialog {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: min(430px, 100%);
+  padding: 22px 24px;
+  border: 1px solid #315889;
+  border-radius: 12px;
+  background: #122747;
+  color: #f8fbff;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
+}
+
+.project-load-dialog .inline-spinner {
+  width: 30px;
+  height: 30px;
+  border-width: 3px;
+  color: var(--accent);
+}
+
+.project-load-dialog div {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.project-load-dialog strong {
+  font-size: 16px;
+}
+
+.project-load-dialog small {
+  overflow: hidden;
+  color: #aebdd2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .variant-delete {
   color: #ef5350;
   border-color: #ef535066;

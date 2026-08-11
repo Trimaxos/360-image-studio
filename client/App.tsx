@@ -25,6 +25,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'360' | 'flat'>('360');
   const [exportOpen, setExportOpen] = useState(false);
   const [isSavingProject, setIsSavingProject] = useState(false);
+  const [isLoadingProject, setIsLoadingProject] = useState(false);
+  const [loadingProjectName, setLoadingProjectName] = useState('');
   const [fileSize, setFileSize] = useState<number>();
   const saveInFlight = useRef(false);
   const imageInput = useRef<HTMLInputElement>(null);
@@ -78,6 +80,8 @@ export default function App() {
   }, []);
 
   const loadProject = useCallback(async (file: File) => {
+    setIsLoadingProject(true);
+    setLoadingProjectName(file.name);
     try {
       const { project } = await api.project.uploadZip(file);
       const meta = await api.image.open(project.imagePath);
@@ -90,6 +94,9 @@ export default function App() {
       setFileSize(meta.sizeBytes);
     } catch (err: any) {
       alert(`Load failed: ${err.message}`);
+    } finally {
+      setIsLoadingProject(false);
+      setLoadingProjectName('');
     }
   }, []);
 
@@ -117,7 +124,7 @@ export default function App() {
           <summary>☰ File</summary>
           <div className="file-menu-popover">
             <button onClick={() => { closeFileMenu(); imageInput.current?.click(); }}>📂 Open Image</button>
-            <button onClick={() => { closeFileMenu(); projectInput.current?.click(); }}>📋 Load Project</button>
+            <button disabled={isLoadingProject} onClick={() => { closeFileMenu(); projectInput.current?.click(); }}>📋 Load Project</button>
             <button disabled={!state.imagePath || isSavingProject} onClick={() => { closeFileMenu(); void saveProject(); }}>
               {isSavingProject ? <><span className="inline-spinner" /> Preparing Project…</> : <>💾 Download Project</>}
             </button>
@@ -151,6 +158,18 @@ export default function App() {
         <div className="project-save-progress" role="status" aria-live="polite">
           <span className="inline-spinner" />
           <span><strong>Đang chuẩn bị project…</strong><small>Đang đóng gói ảnh và dữ liệu, vui lòng chờ.</small></span>
+        </div>
+      )}
+      {isLoadingProject && (
+        <div className="project-load-overlay" role="status" aria-live="assertive" aria-busy="true">
+          <div className="project-load-dialog">
+            <span className="inline-spinner" />
+            <div>
+              <strong>Đang tải project…</strong>
+              <small>{loadingProjectName || 'Đang tải lên và giải nén dữ liệu, vui lòng chờ.'}</small>
+              <small>Project lớn có thể cần vài phút để xử lý.</small>
+            </div>
+          </div>
         </div>
       )}
     </div>
