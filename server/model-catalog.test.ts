@@ -10,6 +10,18 @@ test('fal image edit and inpainting models remain in catalog', () => {
   });
   assert.equal(item?.id, 'fal-ai/editor');
   assert.equal(item?.enabled, true);
+  assert.equal(item?.supportsReferenceImages, false);
+});
+
+test('models accepting image_urls expose reference-image support', () => {
+  const item = classifyFalModel({
+    endpoint_id: 'fal-ai/multi-editor',
+    metadata: { categories: ['image-to-image'] },
+    openapi: { components: { schemas: { Input: { required: ['image_urls', 'prompt'], properties: {
+      image_urls: { type: 'array' }, prompt: { type: 'string' },
+    } } } } },
+  });
+  assert.equal(item?.supportsReferenceImages, true);
 });
 
 test('fal model with unsupported required input stays disabled', () => {

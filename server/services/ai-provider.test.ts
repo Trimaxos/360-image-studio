@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildPreservationPrompt, getProviderFor, normalizeResultToSourceDimensions } from './ai-provider';
+import {
+  addFalImageInputs, buildPreservationPrompt, getProviderFor, normalizeResultToSourceDimensions,
+} from './ai-provider';
 import sharp from 'sharp';
 
 test('selected fal model is used verbatim', () => {
@@ -15,6 +17,20 @@ test('edit prompt requires a minimal localized change and preserves framing', ()
   assert.match(prompt, /Do not zoom, crop/i);
   assert.match(prompt, /leave all other pixels visually identical/i);
   assert.match(prompt, /EDIT REQUEST: add people walking on the road$/);
+});
+
+test('multi-image endpoints receive source first and references afterward', () => {
+  const body: Record<string, unknown> = {};
+  addFalImageInputs(body, ['prompt', 'image_urls'], 'source-data-uri', ['reference-1', 'reference-2']);
+  assert.deepEqual(body.image_urls, ['source-data-uri', 'reference-1', 'reference-2']);
+  assert.equal(body.image_url, undefined);
+});
+
+test('single-image endpoints never receive extra references', () => {
+  const body: Record<string, unknown> = {};
+  addFalImageInputs(body, ['prompt', 'image_url'], 'source-data-uri', ['reference-1']);
+  assert.equal(body.image_url, 'source-data-uri');
+  assert.equal(body.image_urls, undefined);
 });
 
 test('AI result is normalized to the exact source dimensions without cropping', async () => {

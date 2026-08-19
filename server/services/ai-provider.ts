@@ -39,6 +39,19 @@ export function buildRegionEditPrompt(editRequest: string): string {
   return `${REGION_EDIT_RULES} EDIT REQUEST: ${editRequest.trim()}`;
 }
 
+export function addFalImageInputs(
+  body: Record<string, any>,
+  inputProperties: string[],
+  sourceImageDataUri: string,
+  referenceImageDataUris: string[],
+): void {
+  if (inputProperties.includes('image_urls')) {
+    body.image_urls = [sourceImageDataUri, ...referenceImageDataUris];
+  } else {
+    body.image_url = sourceImageDataUri;
+  }
+}
+
 // fal.ai rejects request images over ~25MB. A lossless PNG of a full-resolution
 // panorama crop (e.g. 5600×3000) can exceed that easily; re-encoding as JPEG
 // shrinks photographic content dramatically with negligible quality loss for
@@ -47,10 +60,10 @@ export function buildRegionEditPrompt(editRequest: string): string {
 // still used for local blending and for sizing the returned result.
 const MAX_REQUEST_IMAGE_BYTES = 20 * 1024 * 1024;
 
-async function toRequestDataUri(base64: string): Promise<string> {
+async function toRequestDataUri(base64: string, mimeType = 'image/png'): Promise<string> {
   const buffer = Buffer.from(base64, 'base64');
   if (buffer.length <= MAX_REQUEST_IMAGE_BYTES) {
-    return `data:image/png;base64,${base64}`;
+    return `data:${mimeType};base64,${base64}`;
   }
   let quality = 90;
   let jpeg = await sharp(buffer).jpeg({ quality }).toBuffer();
@@ -81,7 +94,12 @@ export async function normalizeResultToSourceDimensions(
 export interface AiProvider {
   name: 'fal';
   modelId: string;
-  edit(image: string, mask: string, prompt: string): Promise<{ base64Result: string; model: string }>;
+  edit(
+    image: string,
+    mask: string,
+    prompt: string,
+    referenceImages?: Array<{ base64Data: string; mimeType: string }>,
+  ): Promise<{ base64Result: string; model: string }>;
 }
 
 class FalProvider implements AiProvider {
@@ -94,11 +112,19 @@ class FalProvider implements AiProvider {
     private maskRequired?: boolean,
     private isRegionEdit?: boolean,
   ) {}
-  async edit(base64Image: string, base64Mask: string, prompt: string) {
+  async edit(
+    base64Image: string,
+    base64Mask: string,
+    prompt: string,
+    referenceImages: Array<{ base64Data: string; mimeType: string }> = [],
+  ) {
     if (!config.falAiKey) throw new Error('FAL_AI_KEY chưa được cấu hình');
 
     const imageDataUri = await toRequestDataUri(base64Image);
     const maskDataUri = await toRequestDataUri(base64Mask);
+    const referenceDataUris = await Promise.all(referenceImages.map(
+      (image) => toRequestDataUri(image.base64Data, image.mimeType),
+    ));
     const props = this.inputProperties;
 
     // Build request body dynamically based on model's input schema
@@ -107,14 +133,7 @@ class FalProvider implements AiProvider {
     };
 
     // Image input: support both image_url (single) and image_urls (array)
-    if (props.includes('image_urls')) {
-      body.image_urls = [imageDataUri];
-    } else if (props.includes('image_url')) {
-      body.image_url = imageDataUri;
-    } else {
-      // Fallback: try image_url
-      body.image_url = imageDataUri;
-    }
+    addFalImageInputs(body, props, imageDataUri, referenceDataUris);
 
     // Mask input: only send when the model's schema requires it. There is no mask-drawing
     // UI in this app — the mask we'd send is always solid white ("edit everything"), and
@@ -191,6 +210,7 @@ export async function aiEdit(
   base64Image: string,
   base64Mask: string,
   prompt: string,
+  referenceImages?: Array<{ base64Data: string; mimeType: string }>,
   inputProperties?: string[],
   endpointId?: string,
   extraParams?: Record<string, string | number | boolean>,
@@ -198,6 +218,6 @@ export async function aiEdit(
   isRegionEdit?: boolean,
 ) {
   const provider = getProviderFor(providerName, modelId, inputProperties, endpointId, extraParams, maskRequired, isRegionEdit);
-  const result = await provider.edit(base64Image, base64Mask, prompt);
+  const result = await provider.edit(base64Image, base64Mask, prompt, referenceImages);
   return { ...result, provider: provider.name };
 }

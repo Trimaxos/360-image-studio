@@ -187,6 +187,9 @@ export interface AiModelOption {
   hasMask?: boolean;
   /** Whether the model's schema requires a mask input (vs. accepting it optionally) */
   maskRequired?: boolean;
+  /** Whether this endpoint accepts multiple input images, allowing the first
+   *  image to be edited using additional uploaded reference images. */
+  supportsReferenceImages?: boolean;
   /** Real fal.ai endpoint to call, when it differs from `id` (e.g. multiple quality-tier options sharing one endpoint) */
   endpointId?: string;
   /** Extra body params merged into the fal.ai request (e.g. { quality: 'low' }) */
@@ -224,6 +227,12 @@ export interface AiEditRequest {
    *  meaningless full-white placeholder) — tells the server to forward it
    *  whenever the model supports mask input, not only when it's required. */
   hasRegionMask?: boolean;
+  /** Optional visual references. The source image remains input image 1 and
+   *  these are appended as input images 2..N in the same fal.ai request. */
+  referenceImages?: Array<{
+    base64Data: string;
+    mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
+  }>;
   prompt: string;  // always in English by this point
 }
 

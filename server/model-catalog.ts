@@ -110,6 +110,7 @@ export function classifyFalModel(raw: Record<string, any>): AiModelOption | null
     inputProperties: properties,
     hasMask,
     maskRequired,
+    supportsReferenceImages: properties.includes('image_urls'),
   };
 }
 

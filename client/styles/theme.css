@@ -509,6 +509,72 @@ html, body, #root {
   background: #0d7377;
   color: #fff;
 }
+.reference-upload {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.prompt-bar .reference-file-input {
+  display: none;
+}
+.reference-upload-btn {
+  min-height: 42px;
+  padding: 8px 11px;
+  border: 1px solid #3f4b61;
+  border-radius: 6px;
+  background: #172238;
+  color: #8d99ad;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.reference-upload.enabled .reference-upload-btn {
+  border-color: #4fc3f7;
+  background: rgba(79, 195, 247, .13);
+  color: #d8f4ff;
+  box-shadow: 0 0 0 1px rgba(79, 195, 247, .08), 0 0 14px rgba(79, 195, 247, .12);
+}
+.reference-upload-btn:disabled {
+  cursor: not-allowed;
+  opacity: .38;
+  box-shadow: none;
+}
+.reference-image-list {
+  display: flex;
+  gap: 4px;
+}
+.reference-image-chip {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  overflow: hidden;
+  border: 1px solid #4fc3f7;
+  border-radius: 6px;
+  background: #0c1525;
+}
+.reference-image-chip img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.reference-image-chip button {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(5, 8, 15, .82);
+  color: #fff;
+  cursor: pointer;
+  font: 700 13px/1 sans-serif;
+}
 .prompt-error {
   color: #ef5350;
   font-size: 13px;
