@@ -249,6 +249,7 @@ imageRouter.post('/upload', upload.single('image'), async (req, res) => {
 
 const EXPORT_MIME: Record<string, string> = {
   jpeg: 'image/jpeg',
+  jpg: 'image/jpeg',
   png: 'image/png',
   webp: 'image/webp',
   avif: 'image/avif',

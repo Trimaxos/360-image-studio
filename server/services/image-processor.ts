@@ -81,7 +81,7 @@ export async function getTile(
 
 export async function exportImage(
   imagePath: string,
-  format: 'jpeg' | 'png' | 'webp' | 'avif',
+  format: 'jpeg' | 'jpg' | 'png' | 'webp' | 'avif',
   quality: number,
   layers: Layer[],
   _horizon: Horizon
@@ -202,6 +202,8 @@ export async function exportImage(
   }
 
   // Encode to buffer — the response carries the bytes back to the browser
+  // 'jpg' is the same JPEG encoder as 'jpeg' (only the file extension differs)
+  const encodeFormat = format === 'jpg' ? 'jpeg' : format;
   const formatOptions: Record<string, any> = {
     jpeg: { quality },
     png: { quality, compressionLevel: 9 },
@@ -209,7 +211,7 @@ export async function exportImage(
     avif: { quality },
   };
 
-  return pipeline.toFormat(format as any, formatOptions[format]).toBuffer();
+  return pipeline.toFormat(encodeFormat as any, formatOptions[encodeFormat]).toBuffer();
 }
 
 export function exportableLayers(layers: Layer[]): Layer[] {

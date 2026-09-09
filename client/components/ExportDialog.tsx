@@ -8,9 +8,10 @@ interface Props {
   onClose: () => void;
 }
 
-const FORMATS = ['jpeg', 'png', 'webp', 'avif'] as const;
+const FORMATS = ['jpg', 'jpeg', 'png', 'webp', 'avif'] as const;
 
 const MIME: Record<string, string> = {
+  jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
   png: 'image/png',
   webp: 'image/webp',

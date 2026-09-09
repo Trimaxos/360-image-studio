@@ -29,7 +29,7 @@ export interface TileRequest {
 
 export interface ExportRequest {
   path: string;
-  format: 'jpeg' | 'png' | 'webp' | 'avif';
+  format: 'jpeg' | 'jpg' | 'png' | 'webp' | 'avif';
   quality: number;
   layers: Layer[];
   horizon: Horizon;
