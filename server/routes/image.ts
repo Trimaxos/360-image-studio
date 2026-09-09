@@ -104,14 +104,14 @@ imageRouter.post('/perspective-render', async (req, res) => {
     try {
       if (Array.isArray(layers) && layers.length > 0) {
         compositeTempPath = path.join(CACHE_DIR, `layer-source-${randomUUID()}.png`);
-        await exportImage(
+        const compositeBuffer = await exportImage(
           imagePath,
-          compositeTempPath,
           'png',
           95,
           layers,
           { yaw: 0, pitch: 0, roll: 0 },
         );
+        await fs.writeFile(compositeTempPath, compositeBuffer);
         renderSource = compositeTempPath;
       }
 
@@ -247,17 +247,24 @@ imageRouter.post('/upload', upload.single('image'), async (req, res) => {
   }
 });
 
+const EXPORT_MIME: Record<string, string> = {
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  avif: 'image/avif',
+};
+
 imageRouter.post('/export', async (req, res) => {
   try {
     const body = req.body as ExportRequest;
-    if (!body.path || !body.outputPath) {
-      return res.status(400).json({ error: 'path and outputPath are required' });
+    if (!body.path || !body.format) {
+      return res.status(400).json({ error: 'path and format are required' });
     }
-    await exportImage(
-      body.path, body.outputPath, body.format, body.quality,
+    const buffer = await exportImage(
+      body.path, body.format, body.quality,
       body.layers, body.horizon
     );
-    res.json({ success: true, outputPath: body.outputPath });
+    res.type(EXPORT_MIME[body.format]).send(buffer);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -266,21 +273,16 @@ imageRouter.post('/export', async (req, res) => {
 imageRouter.post('/preview', async (req, res) => {
   const { path: imagePath, layers } = req.body as Pick<ExportRequest, 'path' | 'layers'>;
   if (!imagePath) return res.status(400).json({ error: 'path is required' });
-  const previewPath = path.join(CACHE_DIR, `preview-${randomUUID()}.png`);
   try {
-    await exportImage(
+    const buffer = await exportImage(
       imagePath,
-      previewPath,
       'png',
       95,
       Array.isArray(layers) ? layers : [],
       { yaw: 0, pitch: 0, roll: 0 },
     );
-    const buffer = await fs.readFile(previewPath);
     res.type('image/png').send(buffer);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
-  } finally {
-    await fs.unlink(previewPath).catch(() => undefined);
   }
 });

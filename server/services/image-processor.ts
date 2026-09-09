@@ -81,12 +81,11 @@ export async function getTile(
 
 export async function exportImage(
   imagePath: string,
-  outputPath: string,
   format: 'jpeg' | 'png' | 'webp' | 'avif',
   quality: number,
   layers: Layer[],
   _horizon: Horizon
-): Promise<void> {
+): Promise<Buffer> {
   await ensureCacheDir();
 
   // Start with original image
@@ -202,7 +201,7 @@ export async function exportImage(
     pipeline = pipeline.composite(composites);
   }
 
-  // Encode and write
+  // Encode to buffer — the response carries the bytes back to the browser
   const formatOptions: Record<string, any> = {
     jpeg: { quality },
     png: { quality, compressionLevel: 9 },
@@ -210,7 +209,7 @@ export async function exportImage(
     avif: { quality },
   };
 
-  await pipeline.toFormat(format as any, formatOptions[format]).toFile(outputPath);
+  return pipeline.toFormat(format as any, formatOptions[format]).toBuffer();
 }
 
 export function exportableLayers(layers: Layer[]): Layer[] {

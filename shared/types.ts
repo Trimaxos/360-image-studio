@@ -29,7 +29,6 @@ export interface TileRequest {
 
 export interface ExportRequest {
   path: string;
-  outputPath: string;
   format: 'jpeg' | 'png' | 'webp' | 'avif';
   quality: number;
   layers: Layer[];
