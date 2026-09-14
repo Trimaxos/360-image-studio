@@ -74,6 +74,26 @@ async function toRequestDataUri(base64: string, mimeType = 'image/png'): Promise
   return `data:image/jpeg;base64,${jpeg.toString('base64')}`;
 }
 
+// GPT Image 2.5 (via fal) caps output at ~8.3MP (its largest published size is
+// 3840×2160). If no `image_size` is sent, `auto` matches small crops but shrinks
+// large ones drastically (5334×4000 test → 944×704), which then gets upscaled
+// back to the crop by normalizeResultToSourceDimensions and looks blurry.
+// Requesting the crop's own size keeps full resolution when it fits, and fal
+// scales down to the cap — proportionally — when it doesn't.
+const MAX_MODEL_OUTPUT_PIXELS = 3840 * 2160;
+// fal returns dimensions aligned to a 16px grid, so align our request to match
+// and avoid a second internal rounding pass changing the aspect ratio.
+const MODEL_OUTPUT_DIMENSION_STEP = 16;
+
+export function fitModelOutputImageSize(width: number, height: number): { width: number; height: number } {
+  if (width * height <= MAX_MODEL_OUTPUT_PIXELS) return { width, height };
+  const scale = Math.sqrt(MAX_MODEL_OUTPUT_PIXELS / (width * height));
+  return {
+    width: Math.max(MODEL_OUTPUT_DIMENSION_STEP, Math.floor((width * scale) / MODEL_OUTPUT_DIMENSION_STEP) * MODEL_OUTPUT_DIMENSION_STEP),
+    height: Math.max(MODEL_OUTPUT_DIMENSION_STEP, Math.floor((height * scale) / MODEL_OUTPUT_DIMENSION_STEP) * MODEL_OUTPUT_DIMENSION_STEP),
+  };
+}
+
 export async function normalizeResultToSourceDimensions(
   sourceImage: Buffer,
   resultImage: Buffer,
@@ -111,6 +131,7 @@ class FalProvider implements AiProvider {
     private extraParams?: Record<string, string | number | boolean>,
     private maskRequired?: boolean,
     private isRegionEdit?: boolean,
+    private supportsCustomImageSize?: boolean,
   ) {}
   async edit(
     base64Image: string,
@@ -163,6 +184,15 @@ class FalProvider implements AiProvider {
       body.sync_mode = true;
     }
 
+    // Ask the model for the crop's own resolution (capped to its max) instead
+    // of fal's `auto`, which can shrink large crops dramatically.
+    if (this.supportsCustomImageSize && props.includes('image_size')) {
+      const sourceMetadata = await sharp(Buffer.from(base64Image, 'base64')).metadata();
+      if (sourceMetadata.width && sourceMetadata.height) {
+        body.image_size = fitModelOutputImageSize(sourceMetadata.width, sourceMetadata.height);
+      }
+    }
+
     if (this.extraParams) Object.assign(body, this.extraParams);
 
     const response = await fetch(`https://fal.run/${this.endpointId ?? this.modelId}`, {
@@ -199,9 +229,12 @@ export function getProviderFor(
   extraParams?: Record<string, string | number | boolean>,
   maskRequired?: boolean,
   isRegionEdit?: boolean,
+  supportsCustomImageSize?: boolean,
 ): AiProvider {
   if (provider !== 'fal') throw new Error(`Unsupported AI provider: ${provider}`);
-  return new FalProvider(modelId, inputProperties, endpointId, extraParams, maskRequired, isRegionEdit);
+  return new FalProvider(
+    modelId, inputProperties, endpointId, extraParams, maskRequired, isRegionEdit, supportsCustomImageSize,
+  );
 }
 
 export async function aiEdit(
@@ -216,8 +249,11 @@ export async function aiEdit(
   extraParams?: Record<string, string | number | boolean>,
   maskRequired?: boolean,
   isRegionEdit?: boolean,
+  supportsCustomImageSize?: boolean,
 ) {
-  const provider = getProviderFor(providerName, modelId, inputProperties, endpointId, extraParams, maskRequired, isRegionEdit);
+  const provider = getProviderFor(
+    providerName, modelId, inputProperties, endpointId, extraParams, maskRequired, isRegionEdit, supportsCustomImageSize,
+  );
   const result = await provider.edit(base64Image, base64Mask, prompt, referenceImages);
   return { ...result, provider: provider.name };
 }

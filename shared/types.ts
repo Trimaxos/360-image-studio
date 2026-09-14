@@ -196,6 +196,10 @@ export interface AiModelOption {
   endpointId?: string;
   /** Extra body params merged into the fal.ai request (e.g. { quality: 'low' }) */
   extraParams?: Record<string, string | number | boolean>;
+  /** Whether the endpoint accepts an explicit `image_size` of { width, height }.
+   *  When set, the server requests the crop's own size (capped to the model's
+   *  max) instead of fal's `auto`, which shrinks large crops dramatically. */
+  supportsCustomImageSize?: boolean;
 }
 
 export interface ModelCatalogResponse {
