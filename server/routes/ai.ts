@@ -50,7 +50,8 @@ aiRouter.post('/edit', async (req, res) => {
     const forwardMask = !!modelInfo?.maskRequired || !!hasRegionMask;
     const result = await aiEdit(
       provider, modelId, base64Image, base64Mask ?? '', prompt, referenceImages,
-      modelInfo?.inputProperties, modelInfo?.endpointId, modelInfo?.extraParams, forwardMask, !!hasRegionMask,
+      modelInfo?.inputProperties, modelInfo?.endpointId, modelInfo?.extraParams, forwardMask,
+      !!hasRegionMask, modelInfo?.supportsCustomImageSize,
     );
     res.json(result as AiEditResponse);
   } catch (err: any) {

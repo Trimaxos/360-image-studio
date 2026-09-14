@@ -58,9 +58,23 @@ const MODEL_VARIANTS: Record<string, ModelVariant[]> = {
   'openai/gpt-image-2.5/sunburst/edit': GPT_IMAGE_25_QUALITY_VARIANTS,
 };
 
+// Endpoints validated to honor an explicit { width, height } `image_size`.
+// Without it fal's `auto` matches the crop for small crops, but shrinks large
+// ones drastically (e.g. 5334×4000 → 944×704), which the server then upscales
+// back to the crop — visibly blurry. Other endpoints expose the same schema
+// shape but are not enabled here to avoid changing their behavior and cost.
+const CUSTOM_IMAGE_SIZE_ENDPOINTS = new Set([
+  'openai/gpt-image-2.5/flare/edit',
+  'openai/gpt-image-2.5/sunburst/edit',
+]);
+
 // ===== Schema helpers =====
 
-function findInputSchema(schemas: Record<string, any>): { required: string[]; properties: string[] } | null {
+function findInputSchema(schemas: Record<string, any>): {
+  required: string[];
+  properties: string[];
+  propertySchemas: Record<string, any>;
+} | null {
   for (const [key, schema] of Object.entries(schemas)) {
     if (!(schema && typeof schema === 'object')) continue;
     const req = schema.required;
@@ -69,13 +83,30 @@ function findInputSchema(schemas: Record<string, any>): { required: string[]; pr
     if (/output|queuestatus|image$/i.test(key)) continue;
     // Must look like an input schema
     if (/input/i.test(key) || req.some((k: string) => /^(image_urls?|mask_url|mask|prompt)$/i.test(k))) {
+      const propertySchemas = Array.isArray(schema.properties) ? {} : (schema.properties ?? {});
       return {
         required: req as string[],
-        properties: Array.isArray(schema.properties) ? [] : Object.keys(schema.properties ?? {}),
+        properties: Object.keys(propertySchemas),
+        propertySchemas,
       };
     }
   }
   return null;
+}
+
+// `image_size` may accept an explicit { width, height } object — either inline
+// or through a $ref branch in an anyOf union with preset enum strings.
+function supportsImageSizeObject(propertySchema: any, schemas: Record<string, any>): boolean {
+  if (!propertySchema || typeof propertySchema !== 'object') return false;
+  const branches = [propertySchema, ...(Array.isArray(propertySchema.anyOf) ? propertySchema.anyOf : [])];
+  return branches.some((branch: any) => {
+    const resolved = branch?.$ref
+      ? schemas[String(branch.$ref).split('/').pop() ?? '']
+      : branch;
+    return resolved?.type === 'object'
+      && !!resolved.properties?.width
+      && !!resolved.properties?.height;
+  });
 }
 
 export function classifyFalModel(raw: Record<string, any>): AiModelOption | null {
@@ -116,6 +147,8 @@ export function classifyFalModel(raw: Record<string, any>): AiModelOption | null
     hasMask,
     maskRequired,
     supportsReferenceImages: properties.includes('image_urls'),
+    supportsCustomImageSize: CUSTOM_IMAGE_SIZE_ENDPOINTS.has(id)
+      && supportsImageSizeObject(schema?.propertySchemas?.image_size, schemas),
   };
 }
 

@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  addFalImageInputs, buildPreservationPrompt, getProviderFor, normalizeResultToSourceDimensions,
+  addFalImageInputs, buildPreservationPrompt, fitModelOutputImageSize, getProviderFor,
+  normalizeResultToSourceDimensions,
 } from './ai-provider';
 import sharp from 'sharp';
 
@@ -31,6 +32,29 @@ test('single-image endpoints never receive extra references', () => {
   addFalImageInputs(body, ['prompt', 'image_url'], 'source-data-uri', ['reference-1']);
   assert.equal(body.image_url, 'source-data-uri');
   assert.equal(body.image_urls, undefined);
+});
+
+const MODEL_MAX_PIXELS = 3840 * 2160;
+
+test('crop sizes below the model cap are requested unchanged', () => {
+  assert.deepEqual(fitModelOutputImageSize(2667, 2000), { width: 2667, height: 2000 });
+});
+
+test('large crops are capped proportionally to the nearest 16px grid', () => {
+  const size = fitModelOutputImageSize(5334, 4000);
+  assert.ok(size.width * size.height <= MODEL_MAX_PIXELS);
+  assert.equal(size.width % 16, 0);
+  assert.equal(size.height % 16, 0);
+  const sourceRatio = 5334 / 4000;
+  assert.ok(Math.abs(size.width / size.height - sourceRatio) / sourceRatio < 0.01);
+});
+
+test('extreme panorama crops stay inside the cap', () => {
+  const size = fitModelOutputImageSize(16000, 8000);
+  assert.ok(size.width * size.height <= MODEL_MAX_PIXELS);
+  assert.equal(size.width % 16, 0);
+  assert.equal(size.height % 16, 0);
+  assert.ok(Math.abs(size.width / size.height - 2) / 2 < 0.01);
 });
 
 test('AI result is normalized to the exact source dimensions without cropping', async () => {
