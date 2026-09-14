@@ -93,7 +93,13 @@ export interface ProjectState {
   selectVariantForEditing(layerId: string, variantId: string): void;
   selectOriginalVariant(layerId: string): void;
   updateVariantMask(layerId: string, variantId: string, mask: LayerVariant['visibilityMask']): void;
+  updateVariantResult(layerId: string, variantId: string, result: {
+    resultImageId: string; width: number; height: number;
+  }): void;
   removeVariantFromLayer(layerId: string, variantId: string): void;
+  /** Variant vừa import lệch tỉ lệ, cần tự mở trình căn chỉnh (transform) */
+  pendingFitVariant: { layerId: string; variantId: string } | null;
+  setPendingFitVariant(value: { layerId: string; variantId: string } | null): void;
   leaveCanvas(choice: 'save' | 'discard'): void;
   addLayer(layer: Layer): void;
   updateLayer(id: string, patch: Partial<Layer>): void;
@@ -278,6 +284,28 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       : layer),
     hasUnsavedChanges: true,
   })),
+  updateVariantResult: (layerId, variantId, result) => set((state) => ({
+    layers: state.layers.map((layer) => layer.id === layerId
+      ? {
+        ...layer,
+        equirectImageId: undefined,
+        variants: (layer.variants ?? []).map((variant) => variant.id === variantId
+          ? {
+            ...variant,
+            resultImageId: result.resultImageId,
+            width: result.width,
+            height: result.height,
+            needsFit: false,
+            visibilityMask: undefined,
+            equirectImageId: undefined,
+          }
+          : variant),
+      }
+      : layer),
+    hasUnsavedChanges: true,
+  })),
+  pendingFitVariant: null,
+  setPendingFitVariant: (pendingFitVariant) => set({ pendingFitVariant }),
   removeVariantFromLayer: (layerId, variantId) => set((state) => ({
     layers: state.layers.map((layer) =>
       layer.id === layerId
@@ -384,5 +412,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     selectedVariantId: null,
     previewImage: null,
     previewLayer: null,
+    pendingFitVariant: null,
   }),
 }));

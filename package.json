@@ -48,6 +48,7 @@
     "@types/three": "^0.185.1",
     "@vitejs/plugin-react": "^6.0.4",
     "fabric": "^6.9.1",
+    "jsdom": "^20.0.3",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "typescript": "^7.0.2",

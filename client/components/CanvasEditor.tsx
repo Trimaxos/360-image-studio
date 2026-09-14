@@ -5,6 +5,7 @@ import {
   copyPngBlob,
   downloadBlob,
 } from '../lib/canvas-exchange';
+
 import { useProjectStore } from '../stores/project';
 import { applyVariantToPanorama } from '../lib/apply-variant';
 import { composeVariantPreview } from '../lib/visibility-mask';
@@ -130,6 +131,10 @@ export default function CanvasEditor() {
     const current = useProjectStore.getState();
     const layer = current.layers.find((item) => item.id === current.activeLayerId);
     const selected = layer?.variants?.find((variant) => variant.applied);
+    if (choice === 'save' && selected?.needsFit) {
+      setExchangeMessage('Kết quả đang lệch tỉ lệ — mở ✎ Edit → Căn chỉnh xong rồi mới áp dụng.');
+      return;
+    }
     setReturningToView(true);
     setExchangeMessage(selected ? 'Đang áp kết quả vào panorama…' : '');
     try {
@@ -192,36 +197,83 @@ export default function CanvasEditor() {
       const expectedRatio = expectedW / expectedH;
       const importedRatio = importedW / importedH;
       const ratioDelta = Math.abs(expectedRatio - importedRatio) / expectedRatio;
-      if (ratioDelta > 0.01) {
-        throw new Error(
-          `Tỉ lệ ảnh không khớp. Ảnh nhập: ${importedW}×${importedH} (tỉ lệ ${importedRatio.toFixed(3)}). ` +
-          `Yêu cầu: ${expectedW}×${expectedH} (tỉ lệ ${expectedRatio.toFixed(3)}).`,
-        );
+
+      if (ratioDelta <= 0.01) {
+        const base64Result = await blobToPngBase64(file, { width: expectedW, height: expectedH });
+
+        // Persist to server cache FIRST — resultImageId must point to a real file
+        const { resultImageId } = await api.image.saveResultCache(base64Result);
+
+        const variant: LayerVariant = {
+          id: crypto.randomUUID(),
+          resultImageId,
+          source: 'imported',
+          applied: false,
+          width: expectedW,
+          height: expectedH,
+          createdAt: Date.now(),
+        };
+
+        // Add variant to layer and select it (deselects others automatically)
+        state.addVariantToLayer(activeLayer.id, variant);
+        state.selectVariantForEditing(activeLayer.id, variant.id);
+
+        const action = importedW > expectedW ? 'downscale' : 'upscale';
+        setExchangeMessage(`Đã nạp kết quả và ${action} về ${expectedW} × ${expectedH}px.`);
+        return;
       }
 
-      const base64Result = await blobToPngBase64(file, { width: expectedW, height: expectedH });
-
-      // Persist to server cache FIRST — resultImageId must point to a real file
-      const { resultImageId } = await api.image.saveResultCache(base64Result);
-
+      // Tỉ lệ lệch — giữ nguyên ảnh gốc, đánh dấu needsFit để user căn
+      // chỉnh thủ công kiểu Ctrl+T thay vì báo lỗi.
+      const originalBase64 = await blobToPngBase64(file, { width: importedW, height: importedH });
+      const { resultImageId } = await api.image.saveResultCache(originalBase64);
+      const variantId = crypto.randomUUID();
       const variant: LayerVariant = {
-        id: crypto.randomUUID(),
+        id: variantId,
         resultImageId,
         source: 'imported',
         applied: false,
-        width: expectedW,
-        height: expectedH,
+        width: importedW,
+        height: importedH,
+        needsFit: true,
         createdAt: Date.now(),
       };
-
-      // Add variant to layer and select it (deselects others automatically)
       state.addVariantToLayer(activeLayer.id, variant);
       state.selectVariantForEditing(activeLayer.id, variant.id);
-
-      const action = importedW > expectedW ? 'downscale' : 'upscale';
-      setExchangeMessage(`Đã nạp kết quả và ${action} về ${expectedW} × ${expectedH}px.`);
+      state.setPendingFitVariant({ layerId: activeLayer.id, variantId });
+      setExchangeMessage(
+        `Ảnh nhập ${importedW}×${importedH} lệch tỉ lệ tile ${expectedW}×${expectedH} — kéo-thả để căn chỉnh rồi áp dụng.`,
+      );
     } catch (reason) {
       setExchangeMessage(reason instanceof Error ? reason.message : 'Không thể nạp ảnh kết quả.');
+    }
+  };
+
+  const sendToGpt = async () => {
+    if (sourceStatus !== 'ready') return;
+    setExchangeMessage('');
+    try {
+      const tile = activeLayer?.tileCoords;
+      const rawPrompt = state.selectionDraft?.prompt?.trim() ?? '';
+      // Tải crop hiện tại về máy
+      const sourceBlob = await getSourceBlob();
+      downloadBlob(sourceBlob, `crop-${tile?.w ?? 0}x${tile?.h ?? 0}.png`);
+      // Copy prompt chuẩn (dịch EN nếu được) + yêu cầu kích thước
+      let english = rawPrompt;
+      if (rawPrompt) {
+        try {
+          english = (await api.ai.translate(rawPrompt)).translated;
+        } catch { /* giữ prompt gốc khi không dịch được */ }
+      }
+      const sizeNote = tile
+        ? `Output image MUST be exactly ${tile.w}x${tile.h} pixels (aspect ratio ${tile.w}:${tile.h}). Return only the edited image.`
+        : 'Return only the edited image.';
+      const editNote = 'Make a minimal localized edit. Preserve exact framing, composition, colors, lighting and details. Change only what the request asks.';
+      const fullPrompt = [english || '(describe your edit here)', editNote, sizeNote].join('\n\n');
+      await navigator.clipboard.writeText(fullPrompt);
+      setExchangeMessage('Đã tải crop + copy prompt — dán cả 2 vào ChatGPT rồi Import kết quả về.');
+    } catch (reason) {
+      setExchangeMessage(reason instanceof Error ? reason.message : 'Không thể chuẩn bị gửi GPT.');
     }
   };
 
@@ -282,6 +334,7 @@ export default function CanvasEditor() {
           )}
           <button disabled={sourceStatus !== 'ready'} onClick={() => void downloadCanvas()}>Download Image</button>
           <button disabled={sourceStatus !== 'ready'} onClick={() => void copyCanvas()}>Copy Image</button>
+          <button disabled={sourceStatus !== 'ready'} onClick={() => void sendToGpt()} title="Tải crop + copy prompt chuẩn để dán sang ChatGPT">Gửi sang GPT</button>
           <button disabled={sourceStatus !== 'ready'} onClick={() => resultInputRef.current?.click()}>Import Result</button>
         </div>
       </div>

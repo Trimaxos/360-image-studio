@@ -3,9 +3,11 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { LayerVariant } from '../../shared/types';
 import { api } from '../lib/api';
 import { useProjectStore } from '../stores/project';
+import VariantTransformEditor from './VariantTransformEditor';
 
 interface Props { layerId: string; variant: LayerVariant; onClose: () => void }
 type Tool = 'erase' | 'restore';
+type Mode = 'mask' | 'transform';
 
 export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
   const displayRef = useRef<HTMLCanvasElement>(null);
@@ -19,10 +21,16 @@ export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
   const undoRef = useRef<string[]>([]);
   const redoRef = useRef<string[]>([]);
   const [tool, setTool] = useState<Tool>('erase');
+  const [mode, setMode] = useState<Mode>(variant.needsFit ? 'transform' : 'mask');
+  // Khi vừa chốt cắt xong (needsFit tắt) → quay về chế độ brush
+  useEffect(() => {
+    if (!variant.needsFit) setMode('mask');
+  }, [variant.needsFit]);
   const [size, setSize] = useState(variant.visibilityMask?.brushSize ?? 80);
   const [opacity, setOpacity] = useState(variant.visibilityMask?.brushOpacity ?? 100);
   const [hardness, setHardness] = useState(variant.visibilityMask?.brushHardness ?? 80);
   const [ready, setReady] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [showOriginal, setShowOriginal] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [spaceHeld, setSpaceHeld] = useState(false);
@@ -30,6 +38,8 @@ export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
   const panRef = useRef<{ startX: number; startY: number; scrollLeft: number; scrollTop: number } | null>(null);
   const [zoom, setZoom] = useState(1);
   const [fittedSize, setFittedSize] = useState({ width: 0, height: 0 });
+  const [displayVersion, setDisplayVersion] = useState(0);
+  const sizeRef = useRef({ width: 0, height: 0 });
   const [, refreshHistory] = useState(0);
   const [cursor, setCursor] = useState<{ x: number; y: number; scale: number }>();
   const originalUrl = useProjectStore((state) => {
@@ -138,27 +148,59 @@ export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
     undoRef.current.push(mask.toDataURL()); restoreSnapshot(snapshot);
   }, [restoreSnapshot]);
 
+  // Display canvas là element tạm (unmount khi mở chế độ transform), nên
+  // không được ghi trực tiếp vào nó lúc load ảnh — chỉ lưu kích thước vào ref
+  // rồi đồng bộ khi canvas thật sự được render (xem effect theo mode bên dưới).
+  const syncDisplayCanvas = useCallback(() => {
+    const display = displayRef.current;
+    const { width, height } = sizeRef.current;
+    if (!display || !width || !height) return;
+    if (display.width === width && display.height === height) return;
+    display.width = width;
+    display.height = height;
+    setDisplayVersion((value) => value + 1);
+  }, []);
+
   useEffect(() => {
+    let cancelled = false;
+    setLoadError('');
+    setReady(false);
     const source = new Image();
     source.crossOrigin = 'anonymous';
     source.onload = () => {
+      if (cancelled) return;
       const scale = Math.min(1, 1800 / Math.max(source.naturalWidth, source.naturalHeight));
       const width = Math.max(1, Math.round(source.naturalWidth * scale));
       const height = Math.max(1, Math.round(source.naturalHeight * scale));
-      const display = displayRef.current!;
-      display.width = width; display.height = height;
+      sizeRef.current = { width, height };
       const mask = document.createElement('canvas');
       mask.width = width; mask.height = height; maskRef.current = mask; imageRef.current = source;
       const context = mask.getContext('2d')!;
       context.fillStyle = '#fff'; context.fillRect(0, 0, width, height);
       const savedMask = variant.visibilityMask?.base64Mask;
-      if (!savedMask) { redraw(); setReady(true); return; }
+      if (!savedMask) { syncDisplayCanvas(); redraw(); setReady(true); return; }
       const saved = new Image();
-      saved.onload = () => { context.drawImage(saved, 0, 0, width, height); redraw(); setReady(true); };
+      saved.onload = () => {
+        if (cancelled) return;
+        context.drawImage(saved, 0, 0, width, height);
+        syncDisplayCanvas(); redraw(); setReady(true);
+      };
       saved.src = `data:image/png;base64,${savedMask}`;
     };
+    source.onerror = () => {
+      if (!cancelled) setLoadError('Không tải được ảnh kết quả.');
+    };
     source.src = api.image.cacheUrl(variant.resultImageId);
-  }, [redraw, variant.resultImageId, variant.visibilityMask?.base64Mask]);
+    return () => { cancelled = true; };
+  }, [redraw, syncDisplayCanvas, variant.resultImageId, variant.visibilityMask?.base64Mask]);
+
+  // Canvas mask được mount lại mỗi lần quay về chế độ mask (sau transform)
+  // với kích thước mặc định 300×150 — phải đồng bộ lại kích thước thật.
+  useEffect(() => {
+    if (mode !== 'mask' || !ready) return;
+    syncDisplayCanvas();
+    redraw();
+  }, [mode, ready, syncDisplayCanvas, redraw]);
 
   useEffect(() => {
     const canvas = displayRef.current;
@@ -177,7 +219,7 @@ export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
     const observer = new ResizeObserver(measure);
     observer.observe(workspace);
     return () => observer.disconnect();
-  }, [ready]);
+  }, [ready, mode, displayVersion]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -359,13 +401,25 @@ export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
 
   return <div className={`result-mask-backdrop ${fullscreen ? 'fullscreen' : ''}`} role="dialog" aria-modal="true" aria-label="Chỉnh sửa vùng hiển thị">
     <div className={`result-mask-modal ${fullscreen ? 'fullscreen' : ''}`}>
-      <header className="result-mask-header"><div><h2>Tinh chỉnh kết quả</h2><p>Xóa phần AI không cần thiết hoặc phục hồi lại bất cứ lúc nào.</p></div><div className="result-mask-header-actions"><button className={`compare ${showOriginal ? 'active' : ''}`} onClick={toggleOriginal}>◉ {showOriginal ? 'Ẩn ảnh gốc' : 'Hiện ảnh gốc'}</button><button onClick={() => setFullscreen((value) => !value)} aria-label={fullscreen ? 'Thu nhỏ popup' : 'Phóng to popup'} title={fullscreen ? 'Thu nhỏ popup' : 'Phóng to popup toàn màn hình'}>{fullscreen ? '⤢' : '⛶'}</button><button className="primary" onClick={save}>✓ Áp dụng chỉnh sửa</button><button onClick={onClose} aria-label="Đóng">✕</button></div></header>
+      <header className="result-mask-header"><div><h2>Tinh chỉnh kết quả</h2><p>Xóa phần AI không cần thiết hoặc phục hồi lại bất cứ lúc nào.</p></div><div className="result-mask-header-actions"><button className={mode === 'mask' ? 'active' : ''} onClick={() => setMode('mask')} title="Brush xóa / phục hồi">🖌 Mask</button><button className={mode === 'transform' ? 'active' : ''} onClick={() => setMode('transform')} title="Kéo-thả căn chỉnh, phóng to/thu nhỏ (Ctrl+T)">✥ Căn chỉnh</button>{variant.needsFit && <span className="variant-needs-fit">⚠ Lệch tỉ lệ</span>}{mode === 'mask' && <button className={`compare ${showOriginal ? 'active' : ''}`} onClick={toggleOriginal}>◉ {showOriginal ? 'Ẩn ảnh gốc' : 'Hiện ảnh gốc'}</button>}<button onClick={() => setFullscreen((value) => !value)} aria-label={fullscreen ? 'Thu nhỏ popup' : 'Phóng to popup'} title={fullscreen ? 'Thu nhỏ popup' : 'Phóng to popup toàn màn hình'}>{fullscreen ? '⤢' : '⛶'}</button>{mode === 'mask' && <button className="primary" onClick={save}>✓ Áp dụng chỉnh sửa</button>}<button onClick={onClose} aria-label="Đóng">✕</button></div></header>
+      {mode === 'transform' ? (
+        <VariantTransformEditor
+          layerId={layerId}
+          variant={variant}
+          originalUrl={originalUrl}
+          onCommit={() => setMode('mask')}
+          onCancel={() => setMode('mask')}
+        />
+      ) : (
+      <>
       <div className="result-mask-tools">
         <div className="result-mask-mode"><button className={tool === 'erase' ? 'active erase' : ''} onClick={() => setTool('erase')}>⌫ Xóa</button><button className={tool === 'restore' ? 'active restore' : ''} onClick={() => setTool('restore')}>♻ Phục hồi</button><button onClick={resetMask}>Phục hồi toàn bộ</button><button onClick={clearMask}>Xóa toàn bộ</button><button disabled={!undoRef.current.length} onClick={undo} title="Undo (Ctrl+Z)">↶</button><button disabled={!redoRef.current.length} onClick={redo} title="Redo (Ctrl+Y)">↷</button><details className="result-mask-help-popover"><summary aria-label="Hướng dẫn sử dụng brush" title="Hướng dẫn sử dụng"><span>i</span></summary><div><strong>Hướng dẫn brush:</strong><ul><li><b>Xóa:</b> quét vùng muốn trong suốt</li><li><b>Phục hồi:</b> lấy lại pixel gốc</li><li><b>Độ cứng = 0:</b> viền mờ dần (feather)</li><li><b>Độ mờ &lt; 100%:</b> xóa/phục hồi bán phần</li><li>Ctrl+Z / Ctrl+Y để undo/redo</li><li>Giữ <b>Space</b> hoặc chuột giữa để kéo di chuyển ảnh khi đã zoom</li></ul></div></details></div>
         <div className="result-mask-sliders"><label>Kích thước <strong>{size}px</strong><input type="range" min="1" max="300" value={size} onChange={(event) => setSize(+event.target.value)} /></label><label>Độ mờ <strong>{opacity}%</strong><input type="range" min="5" max="100" value={opacity} onChange={(event) => setOpacity(+event.target.value)} /></label><label>Độ cứng <strong>{hardness}%</strong><input type="range" min="0" max="100" value={hardness} onChange={(event) => setHardness(+event.target.value)} /></label></div>
       </div>
       <div className="result-mask-zoom"><button onClick={() => changeZoom(zoom / 1.25)} aria-label="Thu nhỏ">−</button><strong>{Math.round(zoom * 100)}%</strong><button onClick={() => changeZoom(zoom * 1.25)} aria-label="Phóng to">+</button><button onClick={() => setZoom(1)}>Vừa khung</button><span>Ctrl + con lăn để zoom · Giữ Space hoặc chuột giữa để kéo di chuyển</span></div>
-      <div ref={workspaceRef} className="result-mask-workspace" onMouseLeave={() => setCursor(undefined)}><div className="result-mask-canvas-shell" style={{ width: fittedSize.width * zoom || undefined, height: fittedSize.height * zoom || undefined }}><canvas ref={displayRef} style={{ cursor: isPanning ? 'grabbing' : spaceHeld ? 'grab' : 'none', ...(fittedSize.width ? { width: fittedSize.width * zoom, height: fittedSize.height * zoom } : undefined) }} onPointerDown={startPaint} onPointerMove={movePaint} onPointerUp={stopPaint} onPointerCancel={stopPaint} /></div>{!ready && <span className="result-mask-loading">Đang tải ảnh…</span>}{cursor && !isPanning && !spaceHeld && <span className="result-mask-cursor" style={{ left: cursor.x, top: cursor.y, width: size / cursor.scale, height: size / cursor.scale }} />}</div>
+      <div ref={workspaceRef} className="result-mask-workspace" onMouseLeave={() => setCursor(undefined)}><div className="result-mask-canvas-shell" style={{ width: fittedSize.width * zoom || undefined, height: fittedSize.height * zoom || undefined }}><canvas ref={displayRef} style={{ cursor: isPanning ? 'grabbing' : spaceHeld ? 'grab' : 'none', ...(fittedSize.width ? { width: fittedSize.width * zoom, height: fittedSize.height * zoom } : undefined) }} onPointerDown={startPaint} onPointerMove={movePaint} onPointerUp={stopPaint} onPointerCancel={stopPaint} /></div>{!ready && !loadError && <span className="result-mask-loading">Đang tải ảnh…</span>}{loadError && <span className="result-mask-loading error">{loadError}</span>}{cursor && !isPanning && !spaceHeld && <span className="result-mask-cursor" style={{ left: cursor.x, top: cursor.y, width: size / cursor.scale, height: size / cursor.scale }} />}</div>
+      </>
+      )}
     </div>
   </div>;
 }

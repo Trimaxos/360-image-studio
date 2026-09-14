@@ -140,3 +140,29 @@ test('switching variants never reuses the previous panorama cache', () => {
   assert.equal(updated.variants?.find((variant) => variant.id === 'no-people')?.applied, true);
   assert.equal(updated.variants?.find((variant) => variant.id === 'people')?.applied, false);
 });
+
+test('committing a manual fit replaces the variant image and clears the flag', () => {
+  const layer: Layer = {
+    id: 'layer', order: 1, type: 'flat', visible: true,
+    yaw: 0, pitch: 0, roll: 0, fov: 90,
+    tileCoords: { x: 0, y: 0, w: 10, h: 10 },
+    maskData: [], prompt: '', resultImageId: 'original', status: 'committed',
+    variants: [
+      {
+        id: 'imported', resultImageId: 'full-size', source: 'imported', applied: true,
+        width: 20, height: 10, needsFit: true, createdAt: 1,
+      },
+    ],
+  };
+  useProjectStore.setState({ layers: [layer] });
+
+  useProjectStore.getState().updateVariantResult('layer', 'imported', {
+    resultImageId: 'cropped', width: 10, height: 10,
+  });
+
+  const updated = useProjectStore.getState().layers[0].variants?.[0];
+  assert.equal(updated?.resultImageId, 'cropped');
+  assert.equal(updated?.width, 10);
+  assert.equal(updated?.height, 10);
+  assert.equal(updated?.needsFit, false);
+});
