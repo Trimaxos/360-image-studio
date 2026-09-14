@@ -31,7 +31,8 @@ const CURATED_FAL_MODELS: CuratedModel[] = [
   { id: 'fal-ai/bytedance/seedream/v4.5/edit', price: '$0.040/ảnh' },
   { id: 'fal-ai/flux-2/turbo/edit', price: '$0.016' },
   { id: 'fal-ai/flux-2-max/edit', price: '~$0.10' },
-  { id: 'openai/gpt-image-2/edit', price: '' },
+  { id: 'openai/gpt-image-2.5/flare/edit', price: '' },
+  { id: 'openai/gpt-image-2.5/sunburst/edit', price: '', name: 'GPT Image 2.5 Sunburst Edit' },
 ];
 
 // Some endpoints expose a "quality" tier that changes both price and result
@@ -45,12 +46,16 @@ interface ModelVariant {
   extraParams: Record<string, string | number | boolean>;
 }
 
+const GPT_IMAGE_25_QUALITY_VARIANTS: ModelVariant[] = [
+  { suffix: 'low', label: 'Low', price: '~$0.006/ảnh', extraParams: { quality: 'low' } },
+  { suffix: 'medium', label: 'Medium', price: '~$0.013/ảnh', extraParams: { quality: 'medium' } },
+  { suffix: 'high', label: 'High', price: '~$0.053/ảnh', extraParams: { quality: 'high' } },
+  { suffix: 'xhigh', label: 'XHigh', price: '~$0.094/ảnh', extraParams: { quality: 'xhigh' } },
+];
+
 const MODEL_VARIANTS: Record<string, ModelVariant[]> = {
-  'openai/gpt-image-2/edit': [
-    { suffix: 'low', label: 'Low', price: '~$0.015/ảnh', extraParams: { quality: 'low' } },
-    { suffix: 'medium', label: 'Medium', price: '~$0.061/ảnh', extraParams: { quality: 'medium' } },
-    { suffix: 'high', label: 'High', price: '~$0.219/ảnh', extraParams: { quality: 'high' } },
-  ],
+  'openai/gpt-image-2.5/flare/edit': GPT_IMAGE_25_QUALITY_VARIANTS,
+  'openai/gpt-image-2.5/sunburst/edit': GPT_IMAGE_25_QUALITY_VARIANTS,
 };
 
 // ===== Schema helpers =====
