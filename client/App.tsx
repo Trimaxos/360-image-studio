@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import CanvasEditor from './components/CanvasEditor';
+import ErrorBoundary from './components/ErrorBoundary';
 import ExportDialog from './components/ExportDialog';
 import ImageDropZone from './components/ImageDropZone';
 import LayerPanel from './components/LayerPanel';
@@ -137,18 +138,20 @@ export default function App() {
         <button className="logout-btn" onClick={() => void logout()}>Đăng xuất</button>
       </header>
 
-      <main className="workspace">
-        <Toolbar onExport={() => setExportOpen(true)} onSave={() => void saveProject()} isSaving={isSavingProject} />
-        <section className="editor-area">
-          {state.workflow === 'empty'
-            ? <ImageDropZone onOpenFile={openFile} />
-            : canvasWorkflow
-              ? <CanvasEditor />
-              : activeTab === '360' ? <Viewer360 /> : <FlatView />}
-        </section>
-        <LayerPanel />
-      </main>
-      <PromptBar />
+      <ErrorBoundary>
+        <main className="workspace">
+          <Toolbar onExport={() => setExportOpen(true)} onSave={() => void saveProject()} isSaving={isSavingProject} />
+          <section className="editor-area">
+            {state.workflow === 'empty'
+              ? <ImageDropZone onOpenFile={openFile} />
+              : canvasWorkflow
+                ? <CanvasEditor />
+                : activeTab === '360' ? <Viewer360 /> : <FlatView />}
+          </section>
+          <LayerPanel />
+        </main>
+        <PromptBar />
+      </ErrorBoundary>
       <footer className="status-bar">
         <span>{fileName ? `${fileName} — ${state.layers.length} layer(s)` : 'Chưa mở ảnh'}</span>
         <span>{state.workflow}</span>

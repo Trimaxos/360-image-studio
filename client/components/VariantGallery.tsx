@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useProjectStore } from '../stores/project';
 import { api } from '../lib/api';
 import ResultMaskEditor from './ResultMaskEditor';
@@ -7,6 +7,15 @@ export default function VariantGallery() {
   const [editingVariantId, setEditingVariantId] = useState<string | null>(null);
   const layers = useProjectStore((s) => s.layers);
   const activeLayerId = useProjectStore((s) => s.activeLayerId);
+  const pendingFitVariant = useProjectStore((s) => s.pendingFitVariant);
+  const setPendingFitVariant = useProjectStore((s) => s.setPendingFitVariant);
+
+  // Import lệch tỉ lệ → tự mở trình căn chỉnh (transform) cho variant đó
+  useEffect(() => {
+    if (!pendingFitVariant || pendingFitVariant.layerId !== activeLayerId) return;
+    setEditingVariantId(pendingFitVariant.variantId);
+    setPendingFitVariant(null);
+  }, [pendingFitVariant, activeLayerId, setPendingFitVariant]);
   const imagePath = useProjectStore((s) => s.imagePath);
   const selectVariantForEditing = useProjectStore((s) => s.selectVariantForEditing);
   const selectOriginalVariant = useProjectStore((s) => s.selectOriginalVariant);
@@ -90,6 +99,7 @@ export default function VariantGallery() {
                 <span className="variant-size">
                   {variant.width}×{variant.height}
                 </span>
+                {variant.needsFit && <span className="variant-needs-fit">⚠ Cần căn chỉnh</span>}
                 {variant.visibilityMask?.base64Mask && <span className="variant-edited">Đã tinh chỉnh</span>}
               </div>
               <div className="variant-actions">

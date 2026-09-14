@@ -116,6 +116,11 @@ export async function exportImage(
         console.log(`[export] layer ${layer.id}: no applied variant, skipping`);
         continue;
       }
+      // Chưa căn chỉnh thủ công (lệch tỉ lệ tile) thì bỏ qua — tránh composite sai
+      if (appliedVariant.needsFit) {
+        console.log(`[export] layer ${layer.id}: variant ${appliedVariant.id} needs manual fit, skipping`);
+        continue;
+      }
 
       const variantFile = path.join(CACHE_DIR, `${appliedVariant.resultImageId}.png`);
       try {

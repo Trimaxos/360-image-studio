@@ -109,6 +109,9 @@ export interface LayerVariant {
   /** Kích thước thực tế của ảnh kết quả (pixel) */
   width: number;
   height: number;
+  /** True khi ảnh nguồn lệch tỉ lệ tile và user chưa căn chỉnh thủ công
+   *  (transform) — editor sẽ tự mở chế độ căn chỉnh thay vì báo lỗi. */
+  needsFit?: boolean;
   createdAt: number;             // Date.now()
 }
 

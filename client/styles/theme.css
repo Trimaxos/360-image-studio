@@ -1632,6 +1632,145 @@ html, body, #root {
   background: rgba(15, 23, 42, .85);
   color: #fff;
 }
+.result-mask-loading.error {
+  background: rgba(153, 27, 27, .9);
+}
+/* Manual transform (Ctrl+T style) for ratio-mismatched imports */
+.variant-transform {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 10px;
+  padding: 0 22px 20px;
+}
+.variant-transform-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.variant-transform-toolbar button {
+  padding: 7px 12px;
+  border: 1px solid #dbe1ea;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+}
+.variant-transform-toolbar button.primary {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
+}
+.variant-transform-toolbar button:disabled {
+  opacity: .5;
+  cursor: default;
+}
+.variant-transform-info {
+  font-size: 12px;
+  color: #475569;
+  margin-right: auto;
+}
+.variant-transform-opacity {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid #dbe1ea;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12px;
+  color: #475569;
+  white-space: nowrap;
+}
+.variant-transform-opacity strong {
+  color: #1f2937;
+  min-width: 36px;
+}
+.variant-transform-opacity input[type='range'] {
+  width: 110px;
+}
+.variant-transform-workspace {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: 1 1 auto;
+  min-height: 280px;
+  overflow: auto;
+  border: 1px solid #dbe1ea;
+  border-radius: 12px;
+  background: #0b0f16;
+  padding: 12px;
+}
+.variant-transform-canvas {
+  display: block;
+  max-width: 100%;
+  max-height: 52vh;
+  width: auto;
+  height: auto;
+  border-radius: 4px;
+}
+.variant-transform-hint {
+  font-size: 12px;
+  color: #64748b;
+}
+.transform-error {
+  color: #ef5350;
+  font-size: 13px;
+}
+.variant-needs-fit {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+/* Render-error safety net — keeps the top bar (File → Download Project) alive */
+.error-boundary-fallback {
+  flex: 1 1 auto;
+  align-self: stretch;
+  margin: 16px;
+  padding: 24px 28px;
+  border: 1px solid #f3c9c9;
+  border-radius: 12px;
+  background: #fff7f7;
+  color: #7f1d1d;
+  overflow: auto;
+}
+.error-boundary-fallback h2 {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+.error-boundary-fallback p {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.error-boundary-detail {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fee2e2;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  word-break: break-all;
+}
+.error-boundary-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+.error-boundary-actions button {
+  padding: 8px 14px;
+  border: 1px solid #dbe1ea;
+  border-radius: 8px;
+  background: #fff;
+  color: #1f2937;
+  cursor: pointer;
+  font-size: 13px;
+}
 .result-mask-footer {
   display: block;
   padding: 14px 22px 20px;
