@@ -166,3 +166,30 @@ test('committing a manual fit replaces the variant image and clears the flag', (
   assert.equal(updated?.height, 10);
   assert.equal(updated?.needsFit, false);
 });
+
+test('opening a 2:1 image selects 360 mode', () => {
+  useProjectStore.getState().reset();
+  useProjectStore.getState().openImage('/tmp/pano.jpg', 4000, 2000);
+  assert.equal(useProjectStore.getState().imageMode, '360');
+});
+
+test('opening a regular photo selects flat mode', () => {
+  useProjectStore.getState().reset();
+  useProjectStore.getState().openImage('/tmp/photo.jpg', 1920, 1080);
+  assert.equal(useProjectStore.getState().imageMode, 'flat');
+});
+
+test('setImageMode overrides the detected mode and marks unsaved changes', () => {
+  useProjectStore.getState().reset();
+  useProjectStore.getState().openImage('/tmp/photo.jpg', 1920, 1080);
+  useProjectStore.getState().markProjectSaved();
+  useProjectStore.getState().setImageMode('360');
+  assert.equal(useProjectStore.getState().imageMode, '360');
+  assert.equal(useProjectStore.getState().hasUnsavedChanges, true);
+});
+
+test('reset returns to the default 360 mode', () => {
+  useProjectStore.setState({ imageMode: 'flat' });
+  useProjectStore.getState().reset();
+  assert.equal(useProjectStore.getState().imageMode, '360');
+});
