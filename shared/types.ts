@@ -266,7 +266,8 @@ export interface TranslateResponse {
 // ===== Project =====
 
 export interface ProjectFile {
-  version: 4;
+  version: 5;
+  mode: ImageMode;
   imagePath: string;
   layers: Layer[];
   horizon: Horizon;

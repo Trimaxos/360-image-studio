@@ -62,7 +62,8 @@ export default function App() {
     saveInFlight.current = true;
     setIsSavingProject(true);
     const project: ProjectFile = {
-      version: 4,
+      version: 5,
+      mode: current.imageMode,
       imagePath: current.imagePath,
       layers: current.layers,
       horizon: current.horizon,
@@ -88,6 +89,7 @@ export default function App() {
       const meta = await api.image.open(project.imagePath);
       useProjectStore.getState().openImage(project.imagePath, meta.width, meta.height);
       useProjectStore.setState({
+        imageMode: project.mode ?? useProjectStore.getState().imageMode,
         layers: project.layers ?? [],
         horizon: project.horizon ?? { yaw: 0, pitch: 0, roll: 0 },
         hasUnsavedChanges: false,

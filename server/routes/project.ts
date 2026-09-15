@@ -6,7 +6,7 @@ import { ZipArchive } from 'archiver';
 import AdmZip from 'adm-zip';
 import { createHash, randomUUID } from 'crypto';
 import { CACHE_DIR } from '../services/image-processor';
-import type { ProjectFile } from '../../shared/types';
+import type { ImageMode, ProjectFile } from '../../shared/types';
 
 /**
  * Migrate a legacy project (v2/v3) to v4: auto-create a default variant for each
@@ -14,7 +14,7 @@ import type { ProjectFile } from '../../shared/types';
  * layer that is not explicitly a draft — v2 layers have no status field, so they
  * are treated as applied (their result was already committed).
  */
-function migrateProjectToV4(project: { version: number; layers: any[] }): void {
+export function migrateProjectToV4(project: { version: number; layers: any[] }): void {
   project.version = 4;
   project.layers = project.layers.map((layer) => {
     if (!layer.variants && layer.resultImageId) {
@@ -33,6 +33,15 @@ function migrateProjectToV4(project: { version: number; layers: any[] }): void {
     }
     return { ...layer, variants: layer.variants ?? [] };
   });
+}
+
+/**
+ * Migrate a legacy project (v4) to v5: projects now record their image mode.
+ * Anything saved before v5 is a 360 panorama project.
+ */
+export function migrateProjectToV5(project: { version: number; mode?: ImageMode; layers: any[] }): void {
+  project.version = 5;
+  if (!project.mode) project.mode = '360';
 }
 
 export const projectRouter = Router();
@@ -96,7 +105,7 @@ projectRouter.post('/download', async (req, res) => {
     // Write project.json with relative paths
     const projectJson: ProjectFile = {
       ...project,
-      version: 4,
+      version: 5,
       imagePath: `original${origExt}`,
     };
     await fs.writeFile(
@@ -159,6 +168,7 @@ projectRouter.post('/upload-zip', zipUpload.single('project'), async (req, res) 
       }
       // v2 layers have no variants — migrate so export still composites them
       migrateProjectToV4(project);
+      migrateProjectToV5(project);
       await fs.unlink(req.file.path).catch(() => undefined);
       return res.json({ project });
     }
@@ -190,7 +200,7 @@ projectRouter.post('/upload-zip', zipUpload.single('project'), async (req, res) 
     const projectData = await fs.readFile(path.join(extractDir, 'project.json'), 'utf-8');
     const project = JSON.parse(projectData) as Omit<ProjectFile, 'version'> & { version: number };
 
-    if (project.version < 2 || project.version > 4) {
+    if (project.version < 2 || project.version > 5) {
       await fs.rm(extractDir, { recursive: true, force: true });
       await fs.unlink(req.file.path).catch(() => undefined);
       return res.status(400).json({ error: `Unsupported project version: ${project.version}` });
@@ -199,6 +209,11 @@ projectRouter.post('/upload-zip', zipUpload.single('project'), async (req, res) 
     // Migrate legacy v2/v3 → v4: auto-create a default variant from the legacy resultImageId
     if (project.version < 4) {
       migrateProjectToV4(project);
+    }
+
+    // Migrate v4 → v5: legacy projects have no mode and are 360 panoramas.
+    if (project.version < 5) {
+      migrateProjectToV5(project);
     }
 
     // Copy original image to CACHE_DIR
