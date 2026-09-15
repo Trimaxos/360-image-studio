@@ -35,13 +35,18 @@ export function migrateProjectToV4(project: { version: number; layers: any[] }):
   });
 }
 
+/** Only 'flat' is meaningful; anything else (missing, invalid) means a 360 project. */
+function normalizeImageMode(mode: unknown): ImageMode {
+  return mode === 'flat' ? 'flat' : '360';
+}
+
 /**
  * Migrate a legacy project (v4) to v5: projects now record their image mode.
  * Anything saved before v5 is a 360 panorama project.
  */
 export function migrateProjectToV5(project: { version: number; mode?: ImageMode; layers: any[] }): void {
   project.version = 5;
-  if (!project.mode) project.mode = '360';
+  project.mode = normalizeImageMode(project.mode);
 }
 
 export const projectRouter = Router();
@@ -106,6 +111,7 @@ projectRouter.post('/download', async (req, res) => {
     const projectJson: ProjectFile = {
       ...project,
       version: 5,
+      mode: normalizeImageMode(project.mode),
       imagePath: `original${origExt}`,
     };
     await fs.writeFile(
@@ -261,7 +267,7 @@ projectRouter.post('/upload-zip', zipUpload.single('project'), async (req, res) 
     await fs.unlink(req.file.path).catch(() => undefined);
 
     res.json({
-      project: { ...project, imagePath: newOrigPath, layers },
+      project: { ...project, mode: normalizeImageMode(project.mode), imagePath: newOrigPath, layers },
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

@@ -8,6 +8,7 @@ import PromptBar from './components/PromptBar';
 import Toolbar from './components/Toolbar';
 import { downloadBlob } from './lib/canvas-exchange';
 import { api } from './lib/api';
+import { resolveImageMode } from './lib/image-mode';
 import { useProjectStore } from './stores/project';
 import type { ProjectFile } from '../shared/types';
 import FlatView from './views/FlatView';
@@ -89,7 +90,7 @@ export default function App() {
       const meta = await api.image.open(project.imagePath);
       useProjectStore.getState().openImage(project.imagePath, meta.width, meta.height);
       useProjectStore.setState({
-        imageMode: project.mode ?? useProjectStore.getState().imageMode,
+        imageMode: resolveImageMode(project.mode, useProjectStore.getState().imageMode),
         layers: project.layers ?? [],
         horizon: project.horizon ?? { yaw: 0, pitch: 0, roll: 0 },
         hasUnsavedChanges: false,
@@ -105,6 +106,7 @@ export default function App() {
 
   const canvasWorkflow = ['canvas-edit', 'generating', 'ai-review'].includes(state.workflow);
   const isFlatImage = state.imageMode === 'flat';
+  const modeLabel = isFlatImage ? 'Ảnh thường' : '360°';
   const switchImageMode = () => {
     const current = useProjectStore.getState();
     const next = current.imageMode === '360' ? 'flat' : '360';
@@ -142,7 +144,7 @@ export default function App() {
             title="Chuyển đổi chế độ ảnh 360 / ảnh thường"
             onClick={switchImageMode}
           >
-            ⇄ Chế độ: {isFlatImage ? 'Ảnh thường' : '360°'}
+            ⇄ Chế độ: {modeLabel}
           </button>
         </nav>
         <details className="file-menu" ref={fileMenuRef}>
@@ -178,7 +180,7 @@ export default function App() {
       </ErrorBoundary>
       <footer className="status-bar">
         <span>{fileName ? `${fileName} — ${state.layers.length} layer(s)` : 'Chưa mở ảnh'}</span>
-        <span>{isFlatImage ? '🖼 Ảnh thường' : '🌐 360°'} · {state.workflow}</span>
+        <span>{isFlatImage ? '🖼' : '🌐'} {modeLabel} · {state.workflow}</span>
       </footer>
       <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} />
       {isSavingProject && (

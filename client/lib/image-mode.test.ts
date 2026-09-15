@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { detectImageMode } from './image-mode';
+import { detectImageMode, resolveImageMode } from './image-mode';
 
 test('2:1 images are treated as 360 panoramas', () => {
   assert.equal(detectImageMode(4000, 2000), '360');
@@ -22,4 +22,18 @@ test('non-panorama aspect ratios are treated as flat images', () => {
 
 test('missing dimensions default to flat instead of mounting the 360 viewer', () => {
   assert.equal(detectImageMode(0, 0), 'flat');
+});
+
+test('invalid dimensions such as NaN default to flat', () => {
+  assert.equal(detectImageMode(NaN, 100), 'flat');
+});
+
+test('resolveImageMode prefers a valid saved mode over detection', () => {
+  assert.equal(resolveImageMode('flat', '360'), 'flat');
+  assert.equal(resolveImageMode('360', 'flat'), '360');
+});
+
+test('resolveImageMode falls back to detection for missing or invalid saved modes', () => {
+  assert.equal(resolveImageMode(undefined, 'flat'), 'flat');
+  assert.equal(resolveImageMode('panorama', '360'), '360');
 });

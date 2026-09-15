@@ -41,3 +41,10 @@ test('a v2 project migrates to v5 through v4 with variants and 360 mode', () => 
   assert.equal(project.layers[0].variants[0].resultImageId, 'legacy-result');
   assert.equal(project.layers[0].variants[0].applied, true);
 });
+
+test('migrating normalizes an invalid mode to 360', () => {
+  const project: any = { version: 4, mode: 'panorama', layers: [] };
+  migrateProjectToV5(project);
+  assert.equal(project.version, 5);
+  assert.equal(project.mode, '360');
+});

@@ -193,3 +193,9 @@ test('reset returns to the default 360 mode', () => {
   useProjectStore.getState().reset();
   assert.equal(useProjectStore.getState().imageMode, '360');
 });
+
+test('setImageMode can switch to flat', () => {
+  useProjectStore.getState().reset();
+  useProjectStore.getState().setImageMode('flat');
+  assert.equal(useProjectStore.getState().imageMode, 'flat');
+});
