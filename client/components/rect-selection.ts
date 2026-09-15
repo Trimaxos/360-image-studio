@@ -50,14 +50,9 @@ export function containRect(viewport: Size, image: Size): Rect {
 }
 
 export function mapViewportRectToImage(rect: Rect, bounds: Rect, image: Size) {
-  const x = (rect.x - bounds.x) * image.width / bounds.width;
-  const y = (rect.y - bounds.y) * image.height / bounds.height;
-  const width = rect.width * image.width / bounds.width;
-  const height = rect.height * image.height / bounds.height;
-  return {
-    x: Math.max(0, Math.round(x)),
-    y: Math.max(0, Math.round(y)),
-    w: Math.min(image.width, Math.max(1, Math.round(width))),
-    h: Math.min(image.height, Math.max(1, Math.round(height))),
-  };
+  const x = clamp(Math.round((rect.x - bounds.x) * image.width / bounds.width), 0, image.width - 1);
+  const y = clamp(Math.round((rect.y - bounds.y) * image.height / bounds.height), 0, image.height - 1);
+  const width = clamp(Math.round(rect.width * image.width / bounds.width), 1, image.width - x);
+  const height = clamp(Math.round(rect.height * image.height / bounds.height), 1, image.height - y);
+  return { x, y, w: width, h: height };
 }

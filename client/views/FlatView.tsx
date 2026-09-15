@@ -19,6 +19,15 @@ export default function FlatView() {
     setPan({ x: 0, y: 0 });
   }, [imagePath]);
 
+  // The selection overlay maps pointer positions against the contain-fit
+  // image, so any zoom/pan left over from viewing would shift the crop.
+  useEffect(() => {
+    if (workflow !== 'viewing') {
+      setZoom(1);
+      setPan({ x: 0, y: 0 });
+    }
+  }, [workflow]);
+
   return (
     <div
       ref={containerRef}
