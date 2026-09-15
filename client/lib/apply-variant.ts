@@ -7,7 +7,7 @@ export async function applyVariantToPanorama(layerId: string, variantId: string)
   const variant = layer?.variants?.find((item) => item.id === variantId);
   const selection = layer?.selection ?? state.selectionDraft;
   if (!layer || !variant) throw new Error('Không tìm thấy kết quả đã chọn.');
-  if (variant.applied && (layer.type !== 'perspective' || variant.equirectImageId)) return;
+  if (variant.applied && layer.status === 'committed' && (layer.type !== 'perspective' || variant.equirectImageId)) return;
 
   const previousVariants = layer.variants ?? [];
   const selectedVariants = previousVariants.map((item) => ({

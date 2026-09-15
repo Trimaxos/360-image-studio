@@ -167,6 +167,43 @@ test('committing a manual fit replaces the variant image and clears the flag', (
   assert.equal(updated?.needsFit, false);
 });
 
+// Regression: "Don't Save" on a new layer left an applied variant on a draft
+// layer, which the view preview filters out — the result silently disappeared.
+test('discarding a new layer keeps an applied variant committed for the view', () => {
+  useProjectStore.getState().reset();
+  useProjectStore.getState().openImage('/tmp/flat.jpg', 1920, 1080);
+  useProjectStore.getState().createPerspectiveLayer({
+    sourceView: 'flat',
+    mode: 'free-select',
+    rect: { x: 0, y: 0, width: 100, height: 100 },
+    viewport: { width: 800, height: 600 },
+    tileCoords: { x: 10, y: 20, w: 400, h: 300 },
+    viewPose: { yaw: 0, pitch: 0, roll: 0, fov: 90 },
+    prompt: '',
+  }, '', 400, 300);
+  const layerId = useProjectStore.getState().activeLayerId!;
+  useProjectStore.getState().addVariantToLayer(layerId, {
+    id: 'v1', resultImageId: 'hash1', source: 'ai-generated',
+    applied: false, width: 400, height: 300, createdAt: 1,
+  });
+  useProjectStore.getState().selectVariantForEditing(layerId, 'v1');
+  useProjectStore.getState().setSelectionDraft({
+    sourceView: 'flat',
+    mode: 'free-select',
+    rect: { x: 0, y: 0, width: 100, height: 100 },
+    viewport: { width: 800, height: 600 },
+    tileCoords: { x: 10, y: 20, w: 400, h: 300 },
+    viewPose: { yaw: 0, pitch: 0, roll: 0, fov: 90 },
+    prompt: 'remove x',
+  });
+
+  useProjectStore.getState().leaveCanvas('discard');
+
+  const layer = useProjectStore.getState().layers.find((item) => item.id === layerId);
+  assert.equal(layer?.status, 'committed');
+  assert.equal(layer?.variants?.find((item) => item.id === 'v1')?.applied, true);
+});
+
 test('opening a 2:1 image selects 360 mode', () => {
   useProjectStore.getState().reset();
   useProjectStore.getState().openImage('/tmp/pano.jpg', 4000, 2000);

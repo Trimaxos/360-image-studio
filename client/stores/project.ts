@@ -329,6 +329,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ? state.editSnapshot.layer!
         : layer);
       selectionDraft = state.editSnapshot.selection;
+    } else if (choice === 'discard' && state.activeLayerId && !state.editSnapshot?.layer) {
+      // A new layer never goes back to a snapshot. If the user already applied
+      // a variant, commit it — draft layers are filtered out of the view
+      // preview, so discarding would silently hide the applied result.
+      const active = state.layers.find((layer) => layer.id === state.activeLayerId);
+      if ((active?.variants ?? []).some((variant) => variant.applied)) {
+        layers = layers.map((layer) => layer.id === state.activeLayerId
+          ? { ...layer, status: 'committed' as const }
+          : layer);
+      }
     } else if (choice === 'save' && state.activeLayerId) {
       // Update existing layer (created on Apply Rect) with latest selection state
       const draft = state.selectionDraft;
