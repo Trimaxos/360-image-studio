@@ -104,6 +104,14 @@ export default function App() {
   }, []);
 
   const canvasWorkflow = ['canvas-edit', 'generating', 'ai-review'].includes(state.workflow);
+  const isFlatImage = state.imageMode === 'flat';
+  const switchImageMode = () => {
+    const current = useProjectStore.getState();
+    const next = current.imageMode === '360' ? 'flat' : '360';
+    const label = next === 'flat' ? 'Ảnh thường' : '360°';
+    if (current.layers.length > 0 && !confirm(`Đổi sang chế độ ${label}? Các layer hiện có có thể hiển thị sai.`)) return;
+    current.setImageMode(next);
+  };
   return (
     <div className="app-shell">
       <input ref={imageInput} hidden type="file" accept="image/*" onChange={(event) => {
@@ -120,8 +128,22 @@ export default function App() {
       <header className="top-bar">
         <span className="top-bar-logo"><strong>360</strong><span>ImageStudio</span></span>
         <nav className="top-bar-tabs">
-          <button className={`top-bar-tab ${activeTab === '360' ? 'active' : ''}`} disabled={state.workflow !== 'viewing'} onClick={() => setActiveTab('360')}>🌐 360 View</button>
-          <button className={`top-bar-tab ${activeTab === 'flat' ? 'active' : ''}`} disabled={state.workflow !== 'viewing'} onClick={() => setActiveTab('flat')}>📐 Flat View</button>
+          {isFlatImage ? (
+            <button className="top-bar-tab active" disabled>🖼 Ảnh thường</button>
+          ) : (
+            <>
+              <button className={`top-bar-tab ${activeTab === '360' ? 'active' : ''}`} disabled={state.workflow !== 'viewing'} onClick={() => setActiveTab('360')}>🌐 360 View</button>
+              <button className={`top-bar-tab ${activeTab === 'flat' ? 'active' : ''}`} disabled={state.workflow !== 'viewing'} onClick={() => setActiveTab('flat')}>📐 Flat View</button>
+            </>
+          )}
+          <button
+            className="top-bar-tab"
+            disabled={state.workflow !== 'viewing'}
+            title="Chuyển đổi chế độ ảnh 360 / ảnh thường"
+            onClick={switchImageMode}
+          >
+            ⇄ Chế độ: {isFlatImage ? 'Ảnh thường' : '360°'}
+          </button>
         </nav>
         <details className="file-menu" ref={fileMenuRef}>
           <summary>☰ File</summary>
@@ -148,7 +170,7 @@ export default function App() {
               ? <ImageDropZone onOpenFile={openFile} />
               : canvasWorkflow
                 ? <CanvasEditor />
-                : activeTab === '360' ? <Viewer360 /> : <FlatView />}
+                : isFlatImage ? <FlatView /> : activeTab === '360' ? <Viewer360 /> : <FlatView />}
           </section>
           <LayerPanel />
         </main>
@@ -156,7 +178,7 @@ export default function App() {
       </ErrorBoundary>
       <footer className="status-bar">
         <span>{fileName ? `${fileName} — ${state.layers.length} layer(s)` : 'Chưa mở ảnh'}</span>
-        <span>{state.workflow}</span>
+        <span>{isFlatImage ? '🖼 Ảnh thường' : '🌐 360°'} · {state.workflow}</span>
       </footer>
       <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} />
       {isSavingProject && (
