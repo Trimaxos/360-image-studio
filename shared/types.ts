@@ -50,6 +50,11 @@ export interface ViewPose {
   fov: number;
 }
 
+// ===== Image Mode =====
+
+/** 360 = equirectangular panorama; flat = regular photo. */
+export type ImageMode = '360' | 'flat';
+
 // ===== Layer =====
 
 export interface Layer {
