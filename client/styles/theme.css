@@ -893,10 +893,10 @@ html, body, #root {
   overflow: hidden;
   flex: 1 1 auto;
 }
-.flat-image {
+.flat-stage {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  display: block;
   transform-origin: center;
   user-select: none;
 }
@@ -916,7 +916,30 @@ html, body, #root {
   border: 2px solid #4fc3f7;
   background: rgba(79, 195, 247, .12);
   box-shadow: 0 0 0 9999px rgba(0,0,0,.34);
+  pointer-events: none;
+  box-sizing: border-box;
 }
+.selection-rect-requested {
+  border: 1px dashed rgba(255,255,255,.9);
+  background: transparent;
+  box-shadow: none;
+}
+.selection-rect-aligned {
+  border-color: #4fc3f7;
+}
+.rect-crop-options {
+  flex-basis: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: #fff;
+  font-size: 12px;
+  cursor: default;
+}
+.rect-crop-options label { display: flex; align-items: center; gap: 8px; }
+.rect-crop-summary { display: grid; gap: 4px; margin-top: 8px; }
+.rect-crop-summary > span { color: #c3d1db; }
 .selection-rect span {
   position: absolute;
   top: -25px;
@@ -932,6 +955,10 @@ html, body, #root {
   bottom: 24px;
   left: 50%;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  width: min(480px, calc(100% - 24px));
+  z-index: 2;
   gap: 8px;
   transform: translateX(-50%);
 }

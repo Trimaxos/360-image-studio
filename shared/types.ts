@@ -50,6 +50,11 @@ export interface ViewPose {
   fov: number;
 }
 
+// ===== Image Mode =====
+
+/** 360 = equirectangular panorama; flat = regular photo. */
+export type ImageMode = '360' | 'flat';
+
 // ===== Layer =====
 
 export interface Layer {
@@ -135,12 +140,15 @@ export interface PerspectiveRenderRequest {
   rect: { x: number; y: number; width: number; height: number };
   mode: 'full-frame' | 'free-select';
   scaleFactor?: number;
+  /** Align the crop and rendered resolution to the GPT Image size contract. */
+  alignToModel?: boolean;
 }
 
 export interface PerspectiveRenderResponse {
   resultImageId: string;
   width: number;
   height: number;
+  rect?: SelectionDraft['rect'];
 }
 
 export interface ReprojectRequest {
@@ -261,7 +269,8 @@ export interface TranslateResponse {
 // ===== Project =====
 
 export interface ProjectFile {
-  version: 4;
+  version: 5;
+  mode: ImageMode;
   imagePath: string;
   layers: Layer[];
   horizon: Horizon;

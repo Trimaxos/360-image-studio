@@ -1,6 +1,7 @@
 import sharp from 'sharp';
 import type { Layer, ViewPose } from '../../shared/types';
 import { createMaskFromShapes } from './mask-generator';
+import { calcPerspectiveResolution, planPerspectiveCrop, type CropRect } from '../../shared/model-crop';
 
 interface Size { width: number; height: number }
 interface Point { x: number; y: number }
@@ -8,27 +9,7 @@ interface Point { x: number; y: number }
 const radians = (degrees: number) => degrees * Math.PI / 180;
 const modulo = (value: number, divisor: number) => ((value % divisor) + divisor) % divisor;
 
-export function calcPerspectiveResolution(
-  viewport: Size,
-  pose: ViewPose,
-  rect: { x: number; y: number; width: number; height: number },
-  panorama: Size,
-  scaleFactor: number = 1,
-): Size {
-  // Vertical resolution: rect covers rect.height/viewport.height of the vertical FOV.
-  // Each degree of latitude = panorama.height / 180 equirectangular pixels.
-  // outHeight = rect's share of vertical FOV × pixels per degree × scaleFactor.
-  const outHeight = Math.max(1, Math.round(
-    (rect.height / viewport.height) * (pose.fov * panorama.height / 180) * scaleFactor,
-  ));
-
-  // Width derived from rect's own aspect ratio — not viewport's.
-  // This ensures the perspective output preserves the selection proportions
-  // for both full-frame and free-select modes.
-  const outWidth = Math.max(1, Math.round(outHeight * rect.width / rect.height));
-
-  return { width: outWidth, height: outHeight };
-}
+export { calcPerspectiveResolution } from '../../shared/model-crop';
 
 export async function renderPerspective(
   imagePath: string,
@@ -37,8 +18,11 @@ export async function renderPerspective(
   rect: { x: number; y: number; width: number; height: number },
   panorama: Size,
   scaleFactor: number = 1,
-): Promise<{ buffer: Buffer; width: number; height: number }> {
-  const outSize = calcPerspectiveResolution(viewport, viewPose, rect, panorama, scaleFactor);
+  alignToModel = false,
+): Promise<{ buffer: Buffer; width: number; height: number; rect: CropRect }> {
+  const plan = alignToModel ? planPerspectiveCrop(viewport, viewPose, rect, panorama, scaleFactor) : null;
+  const renderRect = plan?.rect ?? rect;
+  const outSize = plan?.output ?? calcPerspectiveResolution(viewport, viewPose, rect, panorama, scaleFactor);
 
   // Read source panorama as raw RGBA
   const source = await sharp(imagePath).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
@@ -66,8 +50,8 @@ export async function renderPerspective(
   for (let py = 0; py < outSize.height; py++) {
     for (let px = 0; px < outSize.width; px++) {
       // Map output pixel to viewport coordinate (center of pixel = +0.5)
-      const vpX = rect.x + (px + 0.5) / outSize.width * rect.width;
-      const vpY = rect.y + (py + 0.5) / outSize.height * rect.height;
+      const vpX = renderRect.x + (px + 0.5) / outSize.width * renderRect.width;
+      const vpY = renderRect.y + (py + 0.5) / outSize.height * renderRect.height;
 
       // NDC: x from -1 (left) to 1 (right), y from 1 (top) to -1 (bottom)
       const ndcX = (vpX / viewport.width) * 2 - 1;
@@ -131,6 +115,7 @@ export async function renderPerspective(
     }).png().toBuffer(),
     width: outSize.width,
     height: outSize.height,
+    rect: renderRect,
   };
 }
 

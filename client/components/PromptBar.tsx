@@ -161,7 +161,7 @@ export default function PromptBar() {
 
   return (
     <div className="prompt-bar">
-      <ModelSelector disabled={!permission.ai || generating} />
+      <ModelSelector disabled={generating} />
       <div className={`reference-upload ${supportsReferenceImages ? 'enabled' : 'disabled'}`}>
         <input
           ref={referenceInputRef}

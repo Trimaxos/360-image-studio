@@ -115,7 +115,8 @@ imageRouter.post('/perspective-render', async (req, res) => {
         renderSource = compositeTempPath;
       }
 
-      const result = await renderPerspective(renderSource, viewPose, viewport, effectiveRect, panoramaSize, scaleFactor);
+      const result = await renderPerspective(renderSource, viewPose, viewport, effectiveRect, panoramaSize, scaleFactor,
+        req.body.alignToModel === true);
 
       // Cache the rendered perspective
       const hash = createHash('sha256').update(result.buffer).digest('hex');
@@ -127,6 +128,7 @@ imageRouter.post('/perspective-render', async (req, res) => {
         resultImageId: hash,
         width: result.width,
         height: result.height,
+        rect: result.rect,
       });
     } finally {
       if (compositeTempPath) await fs.unlink(compositeTempPath).catch(() => undefined);

@@ -14,4 +14,6 @@ export function setupDom(dom: any) {
   g.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
   g.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
   g.IS_REACT_ACT_ENVIRONMENT = true;
+  // jsdom has no layout engine; components still measure on mount.
+  g.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
 }

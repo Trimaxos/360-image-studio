@@ -1,6 +1,33 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { projectScreenPoint, calcPerspectiveResolution, lanczos2Weight, isPoleVisible } from './perspective-projector';
+import { projectScreenPoint, calcPerspectiveResolution, lanczos2Weight, isPoleVisible, renderPerspective } from './perspective-projector';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import sharp from 'sharp';
+import { planPerspectiveCrop } from '../../shared/model-crop';
+
+test('aligned perspective renders exactly the preview canvas and returns its placement', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'aligned-perspective-'));
+  try {
+    const imagePath = path.join(dir, 'source.png');
+    await sharp({ create: { width: 800, height: 400, channels: 3, background: '#808080' } }).png().toFile(imagePath);
+    const viewport = { width: 800, height: 600 };
+    const pose = { yaw: 0, pitch: 0, roll: 0, fov: 90 };
+    const rect = { x: 100, y: 100, width: 500, height: 400 };
+    const panorama = { width: 800, height: 400 };
+    const expected = planPerspectiveCrop(viewport, pose, rect, panorama);
+    const result = await renderPerspective(imagePath, pose, viewport, rect, panorama, 1, true);
+    assert.equal(result.width, expected.output.width);
+    assert.equal(result.height, expected.output.height);
+    assert.deepEqual(result.rect, expected.rect);
+    const meta = await sharp(result.buffer).metadata();
+    assert.equal(meta.width, expected.output.width);
+    assert.equal(meta.height, expected.output.height);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
 const { cos, sin, tan } = Math;
 const radians = (d: number) => d * Math.PI / 180;

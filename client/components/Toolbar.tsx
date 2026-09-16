@@ -38,41 +38,43 @@ export default function Toolbar({ onExport, onSave, isSaving }: Props) {
         ))}
       </section>
 
-      <section className="sidebar-section">
-        <div className="sidebar-section-title">View Controls</div>
-        {controls.map((control) => (
-          <label className="sidebar-view-row" key={control.key}>
-            <span>{control.label}</span>
-            <input
-              className="sidebar-view-number"
-              aria-label={`${control.label} value`}
-              type="number"
-              min={control.min}
-              max={control.max}
-              step={0.1}
-              value={state.viewPose[control.key].toFixed(1)}
-              disabled={!permission.viewControls}
-              onChange={(event) => {
-                const value = event.currentTarget.valueAsNumber;
-                if (!Number.isFinite(value)) return;
-                state.updateViewPose({
-                  [control.key]: Math.min(control.max, Math.max(control.min, value)),
-                });
-              }}
-            />
-            <input
-              aria-label={`${control.label} slider`}
-              type="range"
-              min={control.min}
-              max={control.max}
-              step={0.1}
-              value={state.viewPose[control.key]}
-              disabled={!permission.viewControls}
-              onChange={(event) => state.updateViewPose({ [control.key]: Number(event.target.value) })}
-            />
-          </label>
-        ))}
-      </section>
+      {state.imageMode === '360' && (
+        <section className="sidebar-section">
+          <div className="sidebar-section-title">View Controls</div>
+          {controls.map((control) => (
+            <label className="sidebar-view-row" key={control.key}>
+              <span>{control.label}</span>
+              <input
+                className="sidebar-view-number"
+                aria-label={`${control.label} value`}
+                type="number"
+                min={control.min}
+                max={control.max}
+                step={0.1}
+                value={state.viewPose[control.key].toFixed(1)}
+                disabled={!permission.viewControls}
+                onChange={(event) => {
+                  const value = event.currentTarget.valueAsNumber;
+                  if (!Number.isFinite(value)) return;
+                  state.updateViewPose({
+                    [control.key]: Math.min(control.max, Math.max(control.min, value)),
+                  });
+                }}
+              />
+              <input
+                aria-label={`${control.label} slider`}
+                type="range"
+                min={control.min}
+                max={control.max}
+                step={0.1}
+                value={state.viewPose[control.key]}
+                disabled={!permission.viewControls}
+                onChange={(event) => state.updateViewPose({ [control.key]: Number(event.target.value) })}
+              />
+            </label>
+          ))}
+        </section>
+      )}
 
       <section className="sidebar-section project-section">
         <div className="sidebar-section-title">Project</div>
