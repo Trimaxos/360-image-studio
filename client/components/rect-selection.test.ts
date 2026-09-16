@@ -4,6 +4,7 @@ import {
   containRect,
   dragRect,
   mapViewportRectToImage,
+  planAlignedSelection,
 } from './rect-selection';
 
 test('rectangle starts at pointer down and ends at pointer up', () => {
@@ -11,6 +12,33 @@ test('rectangle starts at pointer down and ends at pointer up', () => {
     dragRect({ x: 120, y: 80 }, { x: 360, y: 220 }, { x: 0, y: 0, width: 800, height: 500 }),
     { x: 120, y: 80, width: 240, height: 140 },
   );
+});
+
+test('flat preview and stored tile use native pixels despite viewport scaling', () => {
+  const plan = planAlignedSelection('flat', { x: 0, y: 75, width: 500, height: 350 },
+    { width: 500, height: 500 }, { width: 1000, height: 700 },
+    { yaw: 0, pitch: 0, roll: 0, fov: 90 });
+  assert.deepEqual(plan.tileCoords, { x: 4, y: 6, w: 992, h: 688 });
+  assert.deepEqual(plan.rect, { x: 2, y: 78, width: 496, height: 344 });
+  assert.deepEqual(plan.output, { width: 992, height: 688 });
+});
+
+test('aligned flat crop stays inside fractional drag edges', () => {
+  const rect = { x: 0.2, y: 0.2, width: 992.1, height: 688.1 };
+  const plan = planAlignedSelection('flat', rect, { width: 1000, height: 700 },
+    { width: 1000, height: 700 }, { yaw: 0, pitch: 0, roll: 0, fov: 90 });
+  assert.ok(plan.rect.x >= rect.x && plan.rect.y >= rect.y);
+  assert.ok(plan.rect.x + plan.rect.width <= rect.x + rect.width);
+  assert.ok(plan.rect.y + plan.rect.height <= rect.y + rect.height);
+});
+
+test('small crop preview maps the exact native crop back to original placement', () => {
+  const plan = planAlignedSelection('flat', { x: 100, y: 100, width: 976, height: 544 },
+    { width: 1200, height: 900 }, { width: 1200, height: 900 },
+    { yaw: 0, pitch: 0, roll: 0, fov: 90 });
+  assert.deepEqual(plan.tileCoords, { x: 112, y: 106, w: 952, h: 532 });
+  assert.deepEqual(plan.rect, { x: 112, y: 106, width: 952, height: 532 });
+  assert.deepEqual(plan.output, { width: 1088, height: 608 });
 });
 
 test('reverse drag keeps the two pointer endpoints', () => {

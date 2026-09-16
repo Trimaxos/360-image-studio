@@ -140,12 +140,15 @@ export interface PerspectiveRenderRequest {
   rect: { x: number; y: number; width: number; height: number };
   mode: 'full-frame' | 'free-select';
   scaleFactor?: number;
+  /** Align the crop and rendered resolution to the GPT Image size contract. */
+  alignToModel?: boolean;
 }
 
 export interface PerspectiveRenderResponse {
   resultImageId: string;
   width: number;
   height: number;
+  rect?: SelectionDraft['rect'];
 }
 
 export interface ReprojectRequest {

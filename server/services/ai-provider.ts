@@ -1,5 +1,6 @@
 import { config } from '../config';
 import sharp from 'sharp';
+import { exactModelSize, isValidModelSize } from '../../shared/model-crop';
 
 const PRESERVATION_RULES = [
   'Make one minimal, localized edit to the provided image.',
@@ -90,6 +91,8 @@ const MODEL_OUTPUT_DIMENSION_STEP = 16;
 const MODEL_SIZE_SEARCH_STEPS = 4;
 
 export function fitModelOutputImageSize(width: number, height: number): { width: number; height: number } {
+  const exact = exactModelSize(width, height);
+  if (exact) return exact;
   const step = MODEL_OUTPUT_DIMENSION_STEP;
   const pixels = width * height;
   let scale = 1;
@@ -160,6 +163,40 @@ export async function normalizeResultToSourceDimensions(
     .toBuffer();
 }
 
+/**
+ * Resizes the outgoing image (and mask) to the exact canvas the model will
+ * return. Sending a differently sized input makes the model re-lay the content
+ * out on its own canvas — a 400×300 crop asked for 960×720 came back shifted
+ * by ~4% once normalized to the source. Callers keep the original buffer for
+ * `normalizeResultToSourceDimensions`.
+ */
+export async function resizeRequestInputs(
+  base64Image: string,
+  base64Mask: string,
+  width: number,
+  height: number,
+): Promise<{ base64Image: string; base64Mask: string }> {
+  const imageBuffer = Buffer.from(base64Image, 'base64');
+  const metadata = await sharp(imageBuffer).metadata();
+  const resizedImage = metadata.width === width && metadata.height === height
+    ? imageBuffer : await sharp(imageBuffer)
+      .resize(width, height, { fit: 'fill', kernel: sharp.kernel.lanczos3 })
+      .png()
+      .toBuffer();
+  let resizedMask = base64Mask;
+  if (base64Mask) {
+    const maskBuffer = Buffer.from(base64Mask, 'base64');
+    const maskMetadata = await sharp(maskBuffer).metadata();
+    if (maskMetadata.width !== width || maskMetadata.height !== height) {
+      resizedMask = (await sharp(maskBuffer)
+        .resize(width, height, { fit: 'fill', kernel: sharp.kernel.lanczos3 })
+        .png()
+        .toBuffer()).toString('base64');
+    }
+  }
+  return { base64Image: resizedImage.toString('base64'), base64Mask: resizedMask };
+}
+
 export interface AiProvider {
   name: 'fal';
   modelId: string;
@@ -190,8 +227,28 @@ class FalProvider implements AiProvider {
   ) {
     if (!config.falAiKey) throw new Error('FAL_AI_KEY chưa được cấu hình');
 
-    const imageDataUri = await toRequestDataUri(base64Image);
-    const maskDataUri = await toRequestDataUri(base64Mask);
+    const sourceImage = Buffer.from(base64Image, 'base64');
+    const sourceMetadata = await sharp(sourceImage).metadata();
+    let requestImageBase64 = base64Image;
+    let requestMaskBase64 = base64Mask;
+    let requestedSize: { width: number; height: number } | null = null;
+    if (this.supportsCustomImageSize
+      && this.inputProperties.includes('image_size')
+      && sourceMetadata.width && sourceMetadata.height) {
+      requestedSize = fitModelOutputImageSize(sourceMetadata.width, sourceMetadata.height);
+      if (!isValidModelSize(requestedSize)) {
+        throw new Error('Kích thước vùng ảnh không phù hợp với model. Hãy chọn lại vùng crop.');
+      }
+      const prepared = await resizeRequestInputs(
+        base64Image, base64Mask, requestedSize.width, requestedSize.height,
+      );
+      requestImageBase64 = prepared.base64Image;
+      requestMaskBase64 = prepared.base64Mask;
+    }
+
+    const imageDataUri = await toRequestDataUri(requestImageBase64);
+    // Masks must remain lossless; JPEG would discard alpha and alter edges.
+    const maskDataUri = `data:image/png;base64,${requestMaskBase64}`;
     const referenceDataUris = await Promise.all(referenceImages.map(
       (image) => toRequestDataUri(image.base64Data, image.mimeType),
     ));
@@ -205,11 +262,8 @@ class FalProvider implements AiProvider {
     // Image input: support both image_url (single) and image_urls (array)
     addFalImageInputs(body, props, imageDataUri, referenceDataUris);
 
-    // Mask input: only send when the model's schema requires it. There is no mask-drawing
-    // UI in this app — the mask we'd send is always solid white ("edit everything"), and
-    // some models (e.g. gpt-image-2) treat a fully-white mask as "discard the reference
-    // image and regenerate from scratch" instead of "the whole crop is eligible for a
-    // prompt-guided edit". Omitting it when optional lets those models edit in place.
+    // The route enables this flag for a required mask OR a user-drawn region.
+    // Omit optional full-white placeholders for prompt-only edits.
     if (this.maskRequired) {
       if (props.includes('mask_url')) {
         body.mask_url = maskDataUri;
@@ -233,13 +287,11 @@ class FalProvider implements AiProvider {
       body.sync_mode = true;
     }
 
-    // Ask the model for the crop's own resolution (capped to its max) instead
-    // of fal's `auto`, which can shrink large crops dramatically.
-    if (this.supportsCustomImageSize && props.includes('image_size')) {
-      const sourceMetadata = await sharp(Buffer.from(base64Image, 'base64')).metadata();
-      if (sourceMetadata.width && sourceMetadata.height) {
-        body.image_size = fitModelOutputImageSize(sourceMetadata.width, sourceMetadata.height);
-      }
+    // Ask the model for the crop's own resolution (aligned and capped to the
+    // sizes fal accepts) instead of fal's `auto`, which can shrink large crops
+    // dramatically. The input image was resized to this exact size above.
+    if (requestedSize) {
+      body.image_size = requestedSize;
     }
 
     if (this.extraParams) Object.assign(body, this.extraParams);
@@ -259,10 +311,14 @@ class FalProvider implements AiProvider {
     if (!resultUrl) throw new Error('fal.ai không trả về ảnh');
     const imageResponse = await fetch(resultUrl);
     if (!imageResponse.ok) throw new Error(`Không tải được kết quả fal.ai: HTTP ${imageResponse.status}`);
-    const normalizedResult = await normalizeResultToSourceDimensions(
-      Buffer.from(base64Image, 'base64'),
-      Buffer.from(await imageResponse.arrayBuffer()),
-    );
+    const resultBuffer = Buffer.from(await imageResponse.arrayBuffer());
+    if (requestedSize) {
+      const actual = await sharp(resultBuffer).metadata();
+      if (actual.width !== requestedSize.width || actual.height !== requestedSize.height) {
+        throw new Error(`Model trả ảnh sai kích thước: ${actual.width}×${actual.height}; yêu cầu ${requestedSize.width}×${requestedSize.height}. Hãy thử lại.`);
+      }
+    }
+    const normalizedResult = await normalizeResultToSourceDimensions(sourceImage, resultBuffer);
     return {
       base64Result: normalizedResult.toString('base64'),
       model: this.modelId,
