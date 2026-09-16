@@ -893,10 +893,10 @@ html, body, #root {
   overflow: hidden;
   flex: 1 1 auto;
 }
-.flat-image {
+.flat-stage {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  display: block;
   transform-origin: center;
   user-select: none;
 }

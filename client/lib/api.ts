@@ -39,18 +39,6 @@ export const api = {
       request<{ resultImageId: string; sizeBytes: number }>('POST', '/image/cache-result', { base64Image }),
     export: (body: any) =>
       request<any>('POST', '/image/export', body),
-    preview: async (body: { path: string; layers: import('../../shared/types').Layer[] }) => {
-      const res = await fetch(`${BASE}/image/preview`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const error = await res.json().catch(() => ({ error: res.statusText }));
-        throw new Error(error.error || `HTTP ${res.status}`);
-      }
-      return res.blob();
-    },
     perspectiveRender: (body: {
       imagePath: string;
       layers?: import('../../shared/types').Layer[];
