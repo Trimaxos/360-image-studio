@@ -34,26 +34,53 @@ test('single-image endpoints never receive extra references', () => {
   assert.equal(body.image_urls, undefined);
 });
 
+const MODEL_MIN_PIXELS = 655_360;
 const MODEL_MAX_PIXELS = 3840 * 2160;
 
-test('crop sizes below the model cap are requested unchanged', () => {
-  assert.deepEqual(fitModelOutputImageSize(2667, 2000), { width: 2667, height: 2000 });
+function assertValidModelSize(size: { width: number; height: number }) {
+  assert.equal(size.width % 16, 0, 'width must be a multiple of 16');
+  assert.equal(size.height % 16, 0, 'height must be a multiple of 16');
+  assert.ok(size.width <= 3840 && size.height <= 3840, 'long edge must stay within 3840px');
+  assert.ok(size.width * size.height >= MODEL_MIN_PIXELS, 'pixel count must reach the model minimum');
+  assert.ok(size.width * size.height <= MODEL_MAX_PIXELS, 'pixel count must stay within the model maximum');
+  assert.ok(Math.max(size.width / size.height, size.height / size.width) <= 3, 'aspect ratio must stay within 3:1');
+}
+
+test('crop sizes are rounded to the 16px grid fal accepts', () => {
+  const size = fitModelOutputImageSize(2667, 2000);
+  assertValidModelSize(size);
+  const sourceRatio = 2667 / 2000;
+  assert.ok(Math.abs(size.width / size.height - sourceRatio) / sourceRatio < 0.01);
 });
 
-test('large crops are capped proportionally to the nearest 16px grid', () => {
+test('a 1000x700 crop keeps its aspect ratio on the 16px grid', () => {
+  const size = fitModelOutputImageSize(1000, 700);
+  assertValidModelSize(size);
+  assert.deepEqual(size, { width: 1008, height: 704 });
+});
+
+test('small crops are upscaled to the model minimum pixel count', () => {
+  const size = fitModelOutputImageSize(400, 300);
+  assertValidModelSize(size);
+  const sourceRatio = 400 / 300;
+  assert.ok(Math.abs(size.width / size.height - sourceRatio) / sourceRatio < 0.02);
+});
+
+test('crops wider than the 3:1 model limit are clamped into range', () => {
+  const size = fitModelOutputImageSize(5000, 800);
+  assertValidModelSize(size);
+});
+
+test('large crops are capped proportionally within every model limit', () => {
   const size = fitModelOutputImageSize(5334, 4000);
-  assert.ok(size.width * size.height <= MODEL_MAX_PIXELS);
-  assert.equal(size.width % 16, 0);
-  assert.equal(size.height % 16, 0);
+  assertValidModelSize(size);
   const sourceRatio = 5334 / 4000;
   assert.ok(Math.abs(size.width / size.height - sourceRatio) / sourceRatio < 0.01);
 });
 
 test('extreme panorama crops stay inside the cap', () => {
   const size = fitModelOutputImageSize(16000, 8000);
-  assert.ok(size.width * size.height <= MODEL_MAX_PIXELS);
-  assert.equal(size.width % 16, 0);
-  assert.equal(size.height % 16, 0);
+  assertValidModelSize(size);
   assert.ok(Math.abs(size.width / size.height - 2) / 2 < 0.01);
 });
 

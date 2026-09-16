@@ -74,24 +74,73 @@ async function toRequestDataUri(base64: string, mimeType = 'image/png'): Promise
   return `data:image/jpeg;base64,${jpeg.toString('base64')}`;
 }
 
-// GPT Image 2.5 (via fal) caps output at ~8.3MP (its largest published size is
-// 3840×2160). If no `image_size` is sent, `auto` matches small crops but shrinks
-// large ones drastically (5334×4000 test → 944×704), which then gets upscaled
-// back to the crop by normalizeResultToSourceDimensions and looks blurry.
-// Requesting the crop's own size keeps full resolution when it fits, and fal
-// scales down to the cap — proportionally — when it doesn't.
+// GPT Image 2.5 (via fal) only accepts explicit `image_size` values whose
+// edges are multiples of 16, with the long edge ≤ 3840px, the aspect ratio
+// ≤ 3:1 and a total pixel count inside [655,360, 8,294,400] (fal docs).
+// Anything else gets silently floored to the 16px grid — e.g. 1000×700 comes
+// back as 992×688 — which changes the aspect ratio, and
+// normalizeResultToSourceDimensions then stretches the result back with
+// `fit: 'fill'`, visibly shifting content. Round the request to the aligned
+// size whose aspect ratio is closest to the crop's own.
+const MIN_MODEL_OUTPUT_PIXELS = 655_360;
 const MAX_MODEL_OUTPUT_PIXELS = 3840 * 2160;
-// fal returns dimensions aligned to a 16px grid, so align our request to match
-// and avoid a second internal rounding pass changing the aspect ratio.
+const MAX_MODEL_LONG_EDGE = 3840;
+const MAX_MODEL_ASPECT_RATIO = 3;
 const MODEL_OUTPUT_DIMENSION_STEP = 16;
+const MODEL_SIZE_SEARCH_STEPS = 4;
 
 export function fitModelOutputImageSize(width: number, height: number): { width: number; height: number } {
-  if (width * height <= MAX_MODEL_OUTPUT_PIXELS) return { width, height };
-  const scale = Math.sqrt(MAX_MODEL_OUTPUT_PIXELS / (width * height));
-  return {
-    width: Math.max(MODEL_OUTPUT_DIMENSION_STEP, Math.floor((width * scale) / MODEL_OUTPUT_DIMENSION_STEP) * MODEL_OUTPUT_DIMENSION_STEP),
-    height: Math.max(MODEL_OUTPUT_DIMENSION_STEP, Math.floor((height * scale) / MODEL_OUTPUT_DIMENSION_STEP) * MODEL_OUTPUT_DIMENSION_STEP),
-  };
+  const step = MODEL_OUTPUT_DIMENSION_STEP;
+  const pixels = width * height;
+  let scale = 1;
+  if (pixels > MAX_MODEL_OUTPUT_PIXELS) {
+    scale = Math.sqrt(MAX_MODEL_OUTPUT_PIXELS / pixels);
+  } else if (pixels > 0 && pixels < MIN_MODEL_OUTPUT_PIXELS) {
+    scale = Math.sqrt(MIN_MODEL_OUTPUT_PIXELS / pixels);
+  }
+
+  let targetWidth = width * scale;
+  let targetHeight = height * scale;
+  const longEdge = Math.max(targetWidth, targetHeight);
+  if (longEdge > MAX_MODEL_LONG_EDGE) {
+    const shrink = MAX_MODEL_LONG_EDGE / longEdge;
+    targetWidth *= shrink;
+    targetHeight *= shrink;
+  }
+  if (targetWidth / targetHeight > MAX_MODEL_ASPECT_RATIO) targetWidth = targetHeight * MAX_MODEL_ASPECT_RATIO;
+  if (targetHeight / targetWidth > MAX_MODEL_ASPECT_RATIO) targetHeight = targetWidth * MAX_MODEL_ASPECT_RATIO;
+
+  const sourceAspect = width / height;
+  const align = (value: number) => Math.max(step, Math.min(MAX_MODEL_LONG_EDGE, Math.round(value / step) * step));
+  const baseWidth = align(targetWidth);
+  const baseHeight = align(targetHeight);
+
+  let best = { width: baseWidth, height: baseHeight, score: Infinity };
+  for (let dw = -MODEL_SIZE_SEARCH_STEPS; dw <= MODEL_SIZE_SEARCH_STEPS; dw += 1) {
+    for (let dh = -MODEL_SIZE_SEARCH_STEPS; dh <= MODEL_SIZE_SEARCH_STEPS; dh += 1) {
+      const candidateWidth = baseWidth + dw * step;
+      const candidateHeight = baseHeight + dh * step;
+      if (candidateWidth < step || candidateHeight < step) continue;
+      if (candidateWidth > MAX_MODEL_LONG_EDGE || candidateHeight > MAX_MODEL_LONG_EDGE) continue;
+      const candidatePixels = candidateWidth * candidateHeight;
+      if (candidatePixels < MIN_MODEL_OUTPUT_PIXELS || candidatePixels > MAX_MODEL_OUTPUT_PIXELS) continue;
+      if (Math.max(candidateWidth / candidateHeight, candidateHeight / candidateWidth) > MAX_MODEL_ASPECT_RATIO) continue;
+      const aspectError = Math.abs(candidateWidth / candidateHeight - sourceAspect) / sourceAspect;
+      const sizeError = Math.abs(candidateWidth - targetWidth) / targetWidth
+        + Math.abs(candidateHeight - targetHeight) / targetHeight;
+      const score = aspectError * 100 + sizeError;
+      if (score < best.score) best = { width: candidateWidth, height: candidateHeight, score };
+    }
+  }
+
+  if (best.score === Infinity) {
+    const fallbackScale = Math.sqrt(MIN_MODEL_OUTPUT_PIXELS / (baseWidth * baseHeight));
+    return {
+      width: Math.min(MAX_MODEL_LONG_EDGE, Math.ceil((baseWidth * fallbackScale) / step) * step),
+      height: Math.min(MAX_MODEL_LONG_EDGE, Math.ceil((baseHeight * fallbackScale) / step) * step),
+    };
+  }
+  return { width: best.width, height: best.height };
 }
 
 export async function normalizeResultToSourceDimensions(
