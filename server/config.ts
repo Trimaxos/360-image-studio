@@ -1,33 +1,22 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-export function normalizeBaseUrl(value: string): string {
-  return value.trim().replace(/\/+$/, '');
+function unquoteEnv(value: string) {
+  const first = value[0];
+  return value.length >= 2 && (first === "'" || first === '"') && value.at(-1) === first
+    ? value.slice(1, -1)
+    : value;
 }
 
 export const config = {
   port: parseInt(process.env.PORT || '3001', 10),
+  authUsername: process.env.AUTH_USERNAME || 'admin',
+  authPasswordHash: unquoteEnv(process.env.AUTH_PASSWORD_HASH
+    || 'scrypt$3ed216f2c20a4a460216a7b4d26c72e8$fb37179cb06c35b9e09158132d1d78b0cdedb629c359ab6e18ff072477b4d98e5b3ee3887e557d202aeeba38d13506cd5385507844fa4b03312ecd44a04a9a06'),
   // Cloud AI (fal.ai)
   falAiKey: process.env.FAL_AI_KEY || '',
-  falAiModel: process.env.AI_MODEL || 'fal-ai/flux-fill',
-  // Local AI (FLUX.1-Fill-dev GGUF)
-  localAiEnabled: process.env.LOCAL_AI_ENABLED === 'true',
-  localAiAutoStart: process.env.LOCAL_AI_AUTO_START === 'true',
-  localAiGgufPath: process.env.LOCAL_AI_GGUF_PATH || './models/flux1-fill-dev-Q4_K_M.gguf',
-  localAiPython: process.env.LOCAL_AI_PYTHON || 'python3',
-  localAiPort: parseInt(process.env.LOCAL_AI_PORT || '8765', 10),
-  localAiBaseUrl: normalizeBaseUrl(
-    process.env.LOCAL_AI_BASE_URL || `http://127.0.0.1:${process.env.LOCAL_AI_PORT || '8765'}`,
-  ),
+  falAiModel: process.env.AI_MODEL || 'fal-ai/flux-2/klein/9b/edit',
   // Translate
   deepseekKey: process.env.DEEPSEEK_API_KEY || '',
-  localModels: [
-    {
-      id: 'local/flux1-fill-dev-q4-k-m',
-      displayName: 'FLUX.1 Fill Dev Q4_K_M',
-      path: process.env.LOCAL_AI_GGUF_PATH || './models/flux1-fill-dev-Q4_K_M.gguf',
-      capabilities: ['inpainting', 'image-edit'] as const,
-      enabled: process.env.LOCAL_AI_ENABLED === 'true',
-    },
-  ],
+  opencodeKey: process.env.OPENCODE_API_KEY || '',
 };

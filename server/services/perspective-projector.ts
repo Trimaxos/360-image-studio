@@ -1,5 +1,7 @@
 import sharp from 'sharp';
 import type { Layer, ViewPose } from '../../shared/types';
+import { createMaskFromShapes } from './mask-generator';
+import { calcPerspectiveResolution, planPerspectiveCrop, type CropRect } from '../../shared/model-crop';
 
 interface Size { width: number; height: number }
 interface Point { x: number; y: number }
@@ -7,29 +9,7 @@ interface Point { x: number; y: number }
 const radians = (degrees: number) => degrees * Math.PI / 180;
 const modulo = (value: number, divisor: number) => ((value % divisor) + divisor) % divisor;
 
-export function calcPerspectiveResolution(
-  viewport: Size,
-  pose: ViewPose,
-  rect: { x: number; y: number; width: number; height: number },
-  panorama: Size,
-): Size {
-  const aspect = viewport.width / viewport.height;
-  const halfFovRad = radians(pose.fov) / 2;
-
-  // Horizontal FOV from vertical FOV + aspect ratio (reverse of projectScreenPoint)
-  const hFovRad = 2 * Math.atan(aspect * Math.tan(halfFovRad));
-  const hFovDeg = hFovRad * 180 / Math.PI;
-
-  // Full perspective view resolution matching source pixel density
-  const fullPerspWidth = hFovDeg * panorama.width / 360;
-  const fullPerspHeight = pose.fov * panorama.height / 180;
-
-  // Scale by rect proportion of viewport
-  return {
-    width: Math.max(1, Math.round((rect.width / viewport.width) * fullPerspWidth)),
-    height: Math.max(1, Math.round((rect.height / viewport.height) * fullPerspHeight)),
-  };
-}
+export { calcPerspectiveResolution } from '../../shared/model-crop';
 
 export async function renderPerspective(
   imagePath: string,
@@ -37,8 +17,12 @@ export async function renderPerspective(
   viewport: Size,
   rect: { x: number; y: number; width: number; height: number },
   panorama: Size,
-): Promise<{ buffer: Buffer; width: number; height: number }> {
-  const outSize = calcPerspectiveResolution(viewport, viewPose, rect, panorama);
+  scaleFactor: number = 1,
+  alignToModel = false,
+): Promise<{ buffer: Buffer; width: number; height: number; rect: CropRect }> {
+  const plan = alignToModel ? planPerspectiveCrop(viewport, viewPose, rect, panorama, scaleFactor) : null;
+  const renderRect = plan?.rect ?? rect;
+  const outSize = plan?.output ?? calcPerspectiveResolution(viewport, viewPose, rect, panorama, scaleFactor);
 
   // Read source panorama as raw RGBA
   const source = await sharp(imagePath).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
@@ -66,8 +50,8 @@ export async function renderPerspective(
   for (let py = 0; py < outSize.height; py++) {
     for (let px = 0; px < outSize.width; px++) {
       // Map output pixel to viewport coordinate (center of pixel = +0.5)
-      const vpX = rect.x + (px + 0.5) / outSize.width * rect.width;
-      const vpY = rect.y + (py + 0.5) / outSize.height * rect.height;
+      const vpX = renderRect.x + (px + 0.5) / outSize.width * renderRect.width;
+      const vpY = renderRect.y + (py + 0.5) / outSize.height * renderRect.height;
 
       // NDC: x from -1 (left) to 1 (right), y from 1 (top) to -1 (bottom)
       const ndcX = (vpX / viewport.width) * 2 - 1;
@@ -131,6 +115,7 @@ export async function renderPerspective(
     }).png().toBuffer(),
     width: outSize.width,
     height: outSize.height,
+    rect: renderRect,
   };
 }
 
@@ -174,7 +159,96 @@ export function projectScreenPoint(
   };
 }
 
-export async function projectPerspectiveLayer(
+// ---- Lanczos2 (a=2) kernel for high-quality resampling ----
+
+/** Lanczos kernel weight for a=2. Zero outside [-2, 2). */
+export function lanczos2Weight(x: number): number {
+  if (x === 0) return 1;
+  const ax = Math.abs(x);
+  if (ax >= 2) return 0;
+  const pix = Math.PI * x;
+  const s = Math.sin(pix) / pix;              // sinc(x)
+  return s * Math.sin(pix / 2) / (pix / 2);  // sinc(x) · sinc(x/2)
+}
+
+/**
+ * Test whether a world-space pole direction (0, ±1, 0) projects inside the
+ * perspective view frustum after inverse rotation.  Used to detect when the
+ * 12-edge-sample heuristic misses the true y-extent because the pole lies
+ * inside the view (not on the edges).
+ */
+export function isPoleVisible(
+  poleDir: [number, number, number],
+  cosYaw: number, sinYaw: number,
+  cosPitch: number, sinPitch: number,
+  cosRoll: number, sinRoll: number,
+  aspect: number, tanHalfFov: number,
+): boolean {
+  // Inverse-rotate world direction → camera space (mirrors main loop lines 372-383)
+  const cx1 = cosYaw * poleDir[0] - sinYaw * poleDir[2];
+  const cz1 = sinYaw * poleDir[0] + cosYaw * poleDir[2];
+  const cy2 = cosPitch * poleDir[1] - sinPitch * cz1;
+  const cz2 = sinPitch * poleDir[1] + cosPitch * cz1;
+  const cx3 = cosRoll * cx1 + sinRoll * cy2;
+  const cy3 = -sinRoll * cx1 + cosRoll * cy2;
+  const cz3 = cz2;
+
+  if (cz3 <= 0) return false;
+  const ndcX = cx3 / (cz3 * aspect * tanHalfFov);
+  const ndcY = cy3 / (cz3 * tanHalfFov);
+  return Math.abs(ndcX) <= 1 && Math.abs(ndcY) <= 1;
+}
+
+// Hugin-style conservative coverage: when the view contains a pole the
+// edge-sample gap-detection heuristic is unreliable — the visible x-range
+// broadens near the pole well beyond what the edge samples capture (Hugin
+// abandoned edge-tracing for exactly this reason).  We fall back to
+// iterating the full panorama width and let the per-pixel NDC test reject
+// out-of-view columns — correct, simple, and still fast (~50-100 ms).
+
+/** Sample source image at subpixel (x,y) using Lanczos2 (4×4 = 16 samples).
+ *  x wraps horizontally (equirectangular), y clamps vertically. */
+function sampleLanczos2(
+  src: Buffer, w: number, h: number,
+  x: number, y: number,
+): [number, number, number, number] {
+  let r = 0, g = 0, b = 0, a = 0, totalWeight = 0;
+  const ix = Math.floor(x);
+  const iy = Math.floor(y);
+  // Lanczos2 kernel radius = 2 → sample sy ∈ [-1, 0, 1, 2]
+  for (let sy = -1; sy <= 2; sy++) {
+    const py = iy + sy;
+    if (py < 0 || py >= h) continue;
+    const wy = lanczos2Weight(y - (py + 0.5));
+    if (wy === 0) continue;
+    for (let sx = -1; sx <= 2; sx++) {
+      const px = ((ix + sx) % w + w) % w;  // horizontal wrap
+      const wx = lanczos2Weight(x - (px + 0.5));
+      const weight = wy * wx;
+      if (weight === 0) continue;
+      const i = (py * w + px) * 4;
+      r += src[i] * weight;
+      g += src[i + 1] * weight;
+      b += src[i + 2] * weight;
+      a += src[i + 3] * weight;
+      totalWeight += weight;
+    }
+  }
+  const norm = totalWeight || 1;
+  return [
+    Math.round(Math.max(0, Math.min(255, r / norm))),
+    Math.round(Math.max(0, Math.min(255, g / norm))),
+    Math.round(Math.max(0, Math.min(255, b / norm))),
+    Math.round(Math.max(0, Math.min(255, a / norm))),
+  ];
+}
+
+/**
+ * Inverse mapping: reproject perspective result back to equirectangular.
+ * Iterates over equirectangular bounding box → inverse rotate → NDC → Lanczos2 sample from source.
+ * No holes, high-quality resampling, ~10× faster than forward mapping.
+ */
+export async function reprojectToEquirectangular(
   resultPath: string,
   layer: Layer,
   panorama: Size,
@@ -182,53 +256,202 @@ export async function projectPerspectiveLayer(
   const selection = layer.selection;
   if (!selection) throw new Error(`Perspective layer ${layer.id} is missing selection projection data`);
 
-  const { data, info } = await sharp(resultPath).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  let mask: Buffer | null = null;
-  if (selection.maskBase64) {
-    mask = await sharp(Buffer.from(selection.maskBase64, 'base64'))
-      .resize(info.width, info.height, { fit: 'fill' })
-      .greyscale()
-      .raw()
-      .toBuffer();
+  // Load source result + apply mask if present
+  const { data: rawData, info } = await sharp(resultPath).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const rw = info.width;
+  const rh = info.height;
+
+  // Pre-mask the source: only bake mask into alpha when per-layer "apply mask" toggle is on
+  // and there are active (non-disabled) mask shapes. Fixes Bug 2: undo lasso → all-black
+  // mask used to make entire layer transparent.
+  let sourceData: Buffer;
+  const activeShapes = (layer.maskData ?? []).filter((s) => s.enabled !== false);
+  if (layer.maskEnabled && activeShapes.length > 0) {
+    const maskBuf = await createMaskFromShapes(activeShapes, rw, rh);
+    const { data: maskRaw } = await sharp(maskBuf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const masked = Buffer.alloc(rw * rh * 4);
+    for (let i = 0; i < rw * rh; i++) {
+      const si = i * 4;
+      masked[si] = rawData[si];
+      masked[si + 1] = rawData[si + 1];
+      masked[si + 2] = rawData[si + 2];
+      masked[si + 3] = maskRaw[si + 3]; // only alpha from mask
+    }
+    sourceData = masked;
+  } else {
+    sourceData = rawData;
   }
 
-  const output = Buffer.alloc(panorama.width * panorama.height * 4);
+  const { width: panoW, height: panoH } = panorama;
+  const viewport = selection.viewport;
   const rect = selection.rect;
-  const feather = Math.max(1, Math.min(8, Math.floor(Math.min(info.width, info.height) / 8)));
+  const pose = selection.viewPose;
 
-  for (let sourceY = 0; sourceY < info.height; sourceY += 1) {
-    for (let sourceX = 0; sourceX < info.width; sourceX += 1) {
-      const sourceIndex = (sourceY * info.width + sourceX) * 4;
-      const maskAlpha = mask ? mask[sourceY * info.width + sourceX] : data[sourceIndex + 3];
-      if (maskAlpha < 2) continue;
-      const edge = Math.min(sourceX, sourceY, info.width - 1 - sourceX, info.height - 1 - sourceY);
-      const featherAlpha = Math.min(1, (edge + 1) / feather);
-      const alpha = Math.round(maskAlpha * featherAlpha);
-      const screenPoint = {
-        x: rect.x + (sourceX + 0.5) / info.width * rect.width,
-        y: rect.y + (sourceY + 0.5) / info.height * rect.height,
-      };
-      const projected = projectScreenPoint(screenPoint, selection.viewport, selection.viewPose, panorama);
-      const targetX = Math.round(projected.x) % panorama.width;
-      const targetY = Math.round(projected.y);
+  // Precompute inverse rotation angles
+  const rollRad = radians(pose.roll);
+  const pitchRad = radians(pose.pitch);
+  const yawRad = radians(pose.yaw);
+  const cosRoll = Math.cos(rollRad);
+  const sinRoll = Math.sin(rollRad);
+  const cosPitch = Math.cos(pitchRad);
+  const sinPitch = Math.sin(pitchRad);
+  const cosYaw = Math.cos(yawRad);
+  const sinYaw = Math.sin(yawRad);
 
-      // A small splat prevents pinholes caused by forward projection.
-      for (let offsetY = 0; offsetY <= 1; offsetY += 1) {
-        for (let offsetX = 0; offsetX <= 1; offsetX += 1) {
-          const px = (targetX + offsetX) % panorama.width;
-          const py = Math.min(panorama.height - 1, targetY + offsetY);
-          const targetIndex = (py * panorama.width + px) * 4;
-          if (alpha < output[targetIndex + 3]) continue;
-          output[targetIndex] = data[sourceIndex];
-          output[targetIndex + 1] = data[sourceIndex + 1];
-          output[targetIndex + 2] = data[sourceIndex + 2];
-          output[targetIndex + 3] = alpha;
-        }
+  // Projection constants (must match renderPerspective)
+  const aspect = viewport.width / viewport.height;
+  const tanHalfFov = Math.tan(radians(pose.fov) / 2);
+
+  // Compute y-bounding box in equirectangular space from 12 sample points
+  const samples = [
+    { x: rect.x, y: rect.y },
+    { x: rect.x + rect.width * 0.25, y: rect.y },
+    { x: rect.x + rect.width * 0.5, y: rect.y },
+    { x: rect.x + rect.width * 0.75, y: rect.y },
+    { x: rect.x + rect.width, y: rect.y },
+    { x: rect.x, y: rect.y + rect.height * 0.5 },
+    { x: rect.x + rect.width, y: rect.y + rect.height * 0.5 },
+    { x: rect.x, y: rect.y + rect.height },
+    { x: rect.x + rect.width * 0.25, y: rect.y + rect.height },
+    { x: rect.x + rect.width * 0.5, y: rect.y + rect.height },
+    { x: rect.x + rect.width * 0.75, y: rect.y + rect.height },
+    { x: rect.x + rect.width, y: rect.y + rect.height },
+  ];
+  const projected = samples.map(p => projectScreenPoint(p, viewport, pose, panorama));
+  let yMin = Infinity, yMax = -Infinity;
+  for (const p of projected) {
+    if (p.y < yMin) yMin = p.y;
+    if (p.y > yMax) yMax = p.y;
+  }
+  const pad = 2;
+  yMin = Math.max(0, Math.floor(yMin) - pad);
+  yMax = Math.min(panoH - 1, Math.ceil(yMax) + pad);
+
+  // When a pole is inside the view frustum the 12 edge-sample heuristic
+  // misses it because the pole always lies at the view CENTER, not on the
+  // edges.  Hugin solves this with a full miniature render; we solve it
+  // with an explicit pole-visibility check (see isPoleVisible above).
+  const northPoleVisible = isPoleVisible(
+    [0, 1, 0], cosYaw, sinYaw, cosPitch, sinPitch, cosRoll, sinRoll, aspect, tanHalfFov,
+  );
+  const southPoleVisible = isPoleVisible(
+    [0, -1, 0], cosYaw, sinYaw, cosPitch, sinPitch, cosRoll, sinRoll, aspect, tanHalfFov,
+  );
+  if (northPoleVisible) yMin = 0;
+  if (southPoleVisible) yMax = panoH - 1;
+
+  // Detect x-wrapping from projected x values.
+  // The largest gap between consecutive sorted xs is the UNVIEWED area.
+  // The VIEWED area is its complement — either one contiguous range or two wrapping ranges.
+  const xs = projected.map(p => p.x);
+  xs.sort((a, b) => a - b);
+  let maxGap = -1, maxGapIdx = -1;
+  for (let i = 0; i < xs.length - 1; i++) {
+    const gap = xs[i + 1] - xs[i];
+    if (gap > maxGap) { maxGap = gap; maxGapIdx = i; }
+  }
+  const circGap = (xs[0] + panoW) - xs[xs.length - 1];
+  if (circGap > maxGap) { maxGap = circGap; maxGapIdx = xs.length - 1; }
+
+  // Build x-ranges covering the VIEWED area
+  interface XRange { start: number; end: number }
+  let xRanges: XRange[];
+  if (maxGapIdx === xs.length - 1) {
+    // Unviewed area wraps 360° → viewed area is contiguous: xs[0] … xs[last]
+    xRanges = [{ start: Math.floor(xs[0]) - pad, end: Math.ceil(xs[xs.length - 1]) + pad }];
+  } else {
+    // Unviewed area is between xs[i] and xs[i+1] → viewed area wraps 360° in two ranges
+    xRanges = [
+      { start: Math.floor(xs[maxGapIdx + 1]) - pad, end: panoW - 1 },
+      { start: 0, end: Math.ceil(xs[maxGapIdx]) + pad },
+    ];
+  }
+  xRanges = xRanges
+    .map(r => ({ start: Math.max(0, r.start), end: Math.min(panoW - 1, r.end) }))
+    .filter(r => r.start <= r.end);
+
+  // Allocate output (transparent fill)
+  const output = Buffer.alloc(panoW * panoH * 4);
+  output.fill(0);
+
+  // Precompute sin/cos for each longitude column
+  const lonSin = new Float64Array(panoW);
+  const lonCos = new Float64Array(panoW);
+  for (let tx = 0; tx < panoW; tx++) {
+    const lon = (tx / panoW) * 2 * Math.PI - Math.PI;
+    lonSin[tx] = Math.sin(lon);
+    lonCos[tx] = Math.cos(lon);
+  }
+
+  // === Main inverse-mapping loop over equirectangular bounding box ===
+  for (let ty = yMin; ty <= yMax; ty++) {
+    const lat = Math.PI / 2 - (ty / panoH) * Math.PI;
+    const cosLat = Math.cos(lat);
+    const sinLat = Math.sin(lat);
+
+    // When a pole is inside the view frustum the edge-sample gap-detection
+    // xRanges are too narrow — the visible longitude span broadens as we
+    // approach the pole (Hugin-style: iterate full width, let NDC cull).
+    const poleInView = northPoleVisible || southPoleVisible;
+    const effectiveRanges = poleInView
+      ? [{ start: 0, end: panoW - 1 }]
+      : xRanges;
+
+    for (const range of effectiveRanges) {
+      for (let tx = range.start; tx <= range.end; tx++) {
+        const wrappedTx = ((tx % panoW) + panoW) % panoW;
+
+        // World direction from equirectangular coordinates
+        const cxW = cosLat * lonSin[wrappedTx];
+        const cyW = sinLat;
+        const czW = cosLat * lonCos[wrappedTx];
+
+        // ---- Inverse rotation: world → camera ----
+        // Forward: R_y(yaw) * R_x(-pitch) * R_z(roll)
+        // Inverse: R_z(-roll) * R_x(pitch) * R_y(-yaw)
+
+        // Step 1: R_y(-yaw)
+        const cx1 = cosYaw * cxW - sinYaw * czW;
+        const cz1 = sinYaw * cxW + cosYaw * czW;
+
+        // Step 2: R_x(pitch) — inverse of forward R_x(-pitch)
+        const cy2 = cosPitch * cyW - sinPitch * cz1;
+        const cz2 = sinPitch * cyW + cosPitch * cz1;
+
+        // Step 3: R_z(-roll)
+        const cx3 = cosRoll * cx1 + sinRoll * cy2;
+        const cy3 = -sinRoll * cx1 + cosRoll * cy2;
+        const cz3 = cz2;
+
+        if (cz3 <= 0) continue;
+
+        // Project to NDC
+        const ndcX = cx3 / (cz3 * aspect * tanHalfFov);
+        const ndcY = cy3 / (cz3 * tanHalfFov);
+
+        if (Math.abs(ndcX) > 1 || Math.abs(ndcY) > 1) continue;
+
+        // NDC → viewport → source pixel
+        const vpX = (ndcX + 1) / 2 * viewport.width;
+        const vpY = (1 - ndcY) / 2 * viewport.height;
+        const srcX = (vpX - rect.x) / rect.width * rw - 0.5;
+        const srcY = (vpY - rect.y) / rect.height * rh - 0.5;
+
+        if (srcX < -0.5 || srcX >= rw - 0.5 || srcY < -0.5 || srcY >= rh - 0.5) continue;
+
+        // Lanczos2 sample
+        const [cr, cg, cb, ca] = sampleLanczos2(sourceData, rw, rh, srcX, srcY);
+
+        const outIdx = (ty * panoW + wrappedTx) * 4;
+        output[outIdx] = cr;
+        output[outIdx + 1] = cg;
+        output[outIdx + 2] = cb;
+        output[outIdx + 3] = ca;
       }
     }
   }
 
   return sharp(output, {
-    raw: { width: panorama.width, height: panorama.height, channels: 4 },
+    raw: { width: panoW, height: panoH, channels: 4 },
   }).png().toBuffer();
 }

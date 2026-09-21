@@ -3,7 +3,9 @@ import path from 'path';
 import fs from 'fs/promises';
 import type { ImageMeta, Horizon, Layer } from '../../shared/types';
 
-export const CACHE_DIR = path.join(process.env.HOME || '/tmp', '.cache', '360-image-studio');
+export const CACHE_DIR = process.env.CACHE_DIR
+  ? path.resolve(process.env.CACHE_DIR)
+  : path.join(process.env.HOME || '/tmp', '.cache', '360-image-studio');
 
 async function ensureCacheDir() {
   await fs.mkdir(CACHE_DIR, { recursive: true });
@@ -79,12 +81,11 @@ export async function getTile(
 
 export async function exportImage(
   imagePath: string,
-  outputPath: string,
-  format: 'jpeg' | 'png' | 'webp' | 'avif',
+  format: 'jpeg' | 'jpg' | 'png' | 'webp' | 'avif',
   quality: number,
   layers: Layer[],
   _horizon: Horizon
-): Promise<void> {
+): Promise<Buffer> {
   await ensureCacheDir();
 
   // Start with original image
@@ -95,73 +96,119 @@ export async function exportImage(
     height: sourceMeta.height ?? 4096,
   };
 
-  // Composite layers in order (bottom to top)
+  // Composite layers in order (bottom to top).
+  // Collect all composites first, then apply in a single call so every layer
+  // stacks correctly.  Chaining .composite() in a loop can overwrite earlier ops.
   const sortedLayers = exportableLayers(layers);
+  const composites: Array<{ input: string | Buffer; top: number; left: number; blend: 'over' }> = [];
+
+  console.log(`[export] total layers: ${layers.length}, exportable: ${sortedLayers.length}`);
+  for (const layer of sortedLayers) {
+    const appliedVariant = (layer.variants ?? []).find((v) => v.applied);
+    console.log(`[export] layer ${layer.id} order=${layer.order} type=${layer.type} resultImageId=${layer.resultImageId} hasAppliedVariant=${!!appliedVariant} variantResultId=${appliedVariant?.resultImageId}`);
+  }
 
   if (sortedLayers.length > 0) {
     for (const layer of sortedLayers) {
-      const cacheFile = path.join(CACHE_DIR, `${layer.resultImageId}.png`);
+      // Find applied variant — if none, skip this layer entirely
+      const appliedVariant = (layer.variants ?? []).find((v) => v.applied);
+      if (!appliedVariant) {
+        console.log(`[export] layer ${layer.id}: no applied variant, skipping`);
+        continue;
+      }
+      // Chưa căn chỉnh thủ công (lệch tỉ lệ tile) thì bỏ qua — tránh composite sai
+      if (appliedVariant.needsFit) {
+        console.log(`[export] layer ${layer.id}: variant ${appliedVariant.id} needs manual fit, skipping`);
+        continue;
+      }
+
+      const variantFile = path.join(CACHE_DIR, `${appliedVariant.resultImageId}.png`);
       try {
-        await fs.access(cacheFile);
+        await fs.access(variantFile);
 
         if (layer.type === 'perspective') {
-          const { projectPerspectiveLayer } = await import('./perspective-projector');
-          const projected = await projectPerspectiveLayer(cacheFile, layer, panoramaSize);
-          pipeline = pipeline.composite([{ input: projected, top: 0, left: 0, blend: 'over' }]);
+          // Prefer the equirectangular buffer generated for THIS applied variant.
+          // Fall back to the legacy layer-level equirectImageId ONLY when the layer
+          // has a single variant (migrated v3) — with >1 variant the layer-level id
+          // may be stale for a different variant and must not be used.
+          const equirectId = appliedVariant.equirectImageId
+            ?? ((layer.variants?.length ?? 0) <= 1 ? layer.equirectImageId : undefined);
+          if (equirectId) {
+            const eqFile = path.join(CACHE_DIR, `${equirectId}.png`);
+            try {
+              await fs.access(eqFile);
+              composites.push({ input: eqFile, top: 0, left: 0, blend: 'over' });
+              continue;
+            } catch { /* fall through */ }
+          }
+          const { reprojectToEquirectangular } = await import('./perspective-projector');
+          let reprojectionSource = variantFile;
+          let maskedTempPath: string | undefined;
+          if (appliedVariant.visibilityMask?.base64Mask) {
+            const maskedResult = await applyVisibilityMask(
+              variantFile,
+              appliedVariant.visibilityMask.base64Mask,
+              0,
+              appliedVariant.width,
+              appliedVariant.height,
+            );
+            maskedTempPath = path.join(CACHE_DIR, `masked-export-${layer.id}-${appliedVariant.id}.png`);
+            await fs.writeFile(maskedTempPath, maskedResult);
+            reprojectionSource = maskedTempPath;
+          }
+          let reprojected: Buffer;
+          try {
+            reprojected = await reprojectToEquirectangular(reprojectionSource, layer, panoramaSize);
+          } finally {
+            if (maskedTempPath) await fs.unlink(maskedTempPath).catch(() => undefined);
+          }
+          composites.push({ input: reprojected, top: 0, left: 0, blend: 'over' });
           continue;
         }
 
-        if (layer.selection?.maskBase64) {
-          const maskedResult = await applyBase64Mask(cacheFile, layer.selection.maskBase64);
-          pipeline = pipeline.composite([{
-            input: maskedResult,
-            top: Math.round(layer.tileCoords.y),
-            left: Math.round(layer.tileCoords.x),
-            blend: 'over',
-          }]);
-          continue;
-        }
+        // Flat layer: use selection.tileCoords as fallback for projects saved
+        // before the createPerspectiveLayer fix (which hardcoded x=0,y=0).
+        const selCoords = (layer as any).selection?.tileCoords;
+        const tileX = layer.tileCoords.x || (selCoords?.x ?? 0);
+        const tileY = layer.tileCoords.y || (selCoords?.y ?? 0);
 
-        // Nếu có maskData, tạo mask từ maskData để blend mượt
-        // thay vì overlay toàn bộ tile hình chữ nhật
-        if (layer.maskData && layer.maskData.length > 0) {
-          const { createMaskFromShapes } = await import('./mask-generator');
-          const maskBuffer = await createMaskFromShapes(
-            layer.maskData,
-            Math.round(layer.tileCoords.w),
-            Math.round(layer.tileCoords.h)
+        // Flat layer: apply visibility mask if present
+        if (appliedVariant.visibilityMask?.base64Mask) {
+          const maskedResult = await applyVisibilityMask(
+            variantFile,
+            appliedVariant.visibilityMask.base64Mask,
+            0,
+            appliedVariant.width,
+            appliedVariant.height,
           );
-
-          // maskBuffer: white shapes on transparent background (RGBA)
-          // Dùng 'dest-in' để giữ result chỉ ở vùng mask không trong suốt
-          const maskedResult = await sharp(cacheFile)
-            .composite([{ input: maskBuffer, blend: 'dest-in' }])
-            .png()
-            .toBuffer();
-
-          // Composite: result ĐÃ masked (có alpha đúng) lên ảnh gốc
-          pipeline = pipeline.composite([{
+          composites.push({
             input: maskedResult,
-            top: Math.round(layer.tileCoords.y),
-            left: Math.round(layer.tileCoords.x),
+            top: Math.round(tileY),
+            left: Math.round(tileX),
             blend: 'over',
-          }]);
+          });
         } else {
-          // Fallback: không có mask → blend toàn bộ tile
-          pipeline = pipeline.composite([{
-            input: cacheFile,
-            top: Math.round(layer.tileCoords.y),
-            left: Math.round(layer.tileCoords.x),
+          // No visibility mask — blend full variant tile with its natural alpha
+          composites.push({
+            input: variantFile,
+            top: Math.round(tileY),
+            left: Math.round(tileX),
             blend: 'over',
-          }]);
+          });
         }
       } catch {
-        // Layer cache file missing — skip silently
+        console.log(`[export] variant cache file missing: ${appliedVariant.resultImageId}, skipping layer`);
       }
     }
   }
 
-  // Encode and write
+  if (composites.length > 0) {
+    pipeline = pipeline.composite(composites);
+  }
+
+  // Encode to buffer — the response carries the bytes back to the browser
+  // 'jpg' is the same JPEG encoder as 'jpeg' (only the file extension differs)
+  const encodeFormat = format === 'jpg' ? 'jpeg' : format;
   const formatOptions: Record<string, any> = {
     jpeg: { quality },
     png: { quality, compressionLevel: 9 },
@@ -169,7 +216,7 @@ export async function exportImage(
     avif: { quality },
   };
 
-  await pipeline.toFormat(format as any, formatOptions[format]).toFile(outputPath);
+  return pipeline.toFormat(encodeFormat as any, formatOptions[encodeFormat]).toBuffer();
 }
 
 export function exportableLayers(layers: Layer[]): Layer[] {
@@ -178,6 +225,7 @@ export function exportableLayers(layers: Layer[]): Layer[] {
     .sort((a, b) => a.order - b.order);
 }
 
+/** @deprecated Use applyVisibilityMask instead — supports feather + alpha combine */
 export async function applyBase64Mask(resultPath: string, base64Mask: string): Promise<Buffer> {
   const metadata = await sharp(resultPath).metadata();
   const width = metadata.width ?? 1;
@@ -195,5 +243,74 @@ export async function applyBase64Mask(resultPath: string, base64Mask: string): P
     rgba[pixel * 4 + 2] = rgb[pixel * 3 + 2];
     rgba[pixel * 4 + 3] = alpha[pixel];
   }
+  return sharp(rgba, { raw: { width, height, channels: 4 } }).png().toBuffer();
+}
+
+export async function applyVisibilityMask(
+  resultPath: string,
+  base64Mask: string,
+  softness: number,
+  width: number,
+  height: number,
+): Promise<Buffer> {
+  // Decode mask
+  const maskBuf = await sharp(Buffer.from(base64Mask, 'base64'))
+    .resize(width, height, { fit: 'fill' })
+    .ensureAlpha()
+    .png()
+    .toBuffer();
+
+  // Apply feather (blur) if softness > 0
+  let featheredMask = maskBuf;
+  if (softness > 0) {
+    const maxSize = Math.max(width, height);
+    const sigma = (softness / 100) * (maxSize / 100); // scale sigma to reasonable range
+    featheredMask = await sharp(maskBuf)
+      .blur(sigma)
+      .png()
+      .toBuffer();
+  }
+
+  // Extract luminance from the feathered mask — the client's mask is an OPAQUE PNG
+  // (black background = hidden, white strokes = revealed). Its alpha channel is 255
+  // everywhere, so visibility must be read from the greyscale/luma value instead.
+  const maskLuma = await sharp(featheredMask)
+    .greyscale()
+    .raw()
+    .toBuffer();
+
+  const resultRgb = await sharp(resultPath)
+    .removeAlpha()
+    .raw()
+    .toBuffer();
+
+  const resultAlpha = await sharp(resultPath)
+    .ensureAlpha()
+    .extractChannel(3)
+    .raw()
+    .toBuffer();
+
+  // Combine: result RGB + min(maskLuma, resultAlpha) as final alpha.
+  // The mask ANDs with the result's natural alpha: a region is visible only where
+  // the mask is bright AND the result itself has pixels (preserves PNG transparency).
+  // Also force a short feather at the outer image boundary. Perspective results are
+  // rectangular; even a tiny residual alpha on that boundary becomes a visible seam
+  // after reprojection onto a panorama.
+  const pixelCount = width * height;
+  const rgba = Buffer.alloc(pixelCount * 4);
+  const edgeFeather = Math.max(8, Math.min(48, Math.round(Math.min(width, height) * 0.015)));
+  for (let i = 0; i < pixelCount; i++) {
+    const x = i % width;
+    const y = Math.floor(i / width);
+    const edgeDistance = Math.min(x, y, width - 1 - x, height - 1 - y);
+    const edgeProgress = Math.max(0, Math.min(1, edgeDistance / edgeFeather));
+    // Smoothstep avoids introducing a second perceptible line at the end of the fade.
+    const edgeAlpha = edgeProgress * edgeProgress * (3 - 2 * edgeProgress);
+    rgba[i * 4]     = resultRgb[i * 3];
+    rgba[i * 4 + 1] = resultRgb[i * 3 + 1];
+    rgba[i * 4 + 2] = resultRgb[i * 3 + 2];
+    rgba[i * 4 + 3] = Math.round(Math.min(maskLuma[i], resultAlpha[i]) * edgeAlpha);
+  }
+
   return sharp(rgba, { raw: { width, height, channels: 4 } }).png().toBuffer();
 }

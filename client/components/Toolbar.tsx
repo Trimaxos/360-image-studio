@@ -1,13 +1,13 @@
-import React from 'react';
 import { permissionsFor } from '../stores/workflow';
 import { useProjectStore } from '../stores/project';
 
 interface Props {
   onExport: () => void;
   onSave: () => void;
+  isSaving: boolean;
 }
 
-export default function Toolbar({ onExport, onSave }: Props) {
+export default function Toolbar({ onExport, onSave, isSaving }: Props) {
   const state = useProjectStore();
   const permission = permissionsFor(state.workflow);
   const committed = state.layers.some((layer) => layer.status === 'committed');
@@ -19,8 +19,6 @@ export default function Toolbar({ onExport, onSave }: Props) {
   ];
   const tools = [
     { id: 'rect' as const, icon: '▭', label: 'Rectangle Select', enabled: permission.rect },
-    { id: 'brush' as const, icon: '🖊', label: 'Brush Mask', enabled: permission.brush },
-    { id: 'lasso' as const, icon: '⌁', label: 'Lasso', enabled: permission.lasso },
   ];
 
   return (
@@ -38,35 +36,51 @@ export default function Toolbar({ onExport, onSave }: Props) {
             <span>{tool.label}</span>
           </button>
         ))}
-        <button className="sidebar-btn" disabled={!permission.undo} onClick={() => window.dispatchEvent(new Event('canvas-undo'))}>
-          <span className="sidebar-btn-icon">↩</span><span>Undo</span>
-        </button>
       </section>
 
-      <section className="sidebar-section">
-        <div className="sidebar-section-title">View Controls</div>
-        {controls.map((control) => (
-          <label className="sidebar-view-row" key={control.key}>
-            <span>{control.label}</span>
-            <strong>{state.viewPose[control.key].toFixed(1)}°</strong>
-            <input
-              aria-label={control.label}
-              type="range"
-              min={control.min}
-              max={control.max}
-              step={0.1}
-              value={state.viewPose[control.key]}
-              disabled={!permission.viewControls}
-              onChange={(event) => state.updateViewPose({ [control.key]: Number(event.target.value) })}
-            />
-          </label>
-        ))}
-      </section>
+      {state.imageMode === '360' && (
+        <section className="sidebar-section">
+          <div className="sidebar-section-title">View Controls</div>
+          {controls.map((control) => (
+            <label className="sidebar-view-row" key={control.key}>
+              <span>{control.label}</span>
+              <input
+                className="sidebar-view-number"
+                aria-label={`${control.label} value`}
+                type="number"
+                min={control.min}
+                max={control.max}
+                step={0.1}
+                value={state.viewPose[control.key].toFixed(1)}
+                disabled={!permission.viewControls}
+                onChange={(event) => {
+                  const value = event.currentTarget.valueAsNumber;
+                  if (!Number.isFinite(value)) return;
+                  state.updateViewPose({
+                    [control.key]: Math.min(control.max, Math.max(control.min, value)),
+                  });
+                }}
+              />
+              <input
+                aria-label={`${control.label} slider`}
+                type="range"
+                min={control.min}
+                max={control.max}
+                step={0.1}
+                value={state.viewPose[control.key]}
+                disabled={!permission.viewControls}
+                onChange={(event) => state.updateViewPose({ [control.key]: Number(event.target.value) })}
+              />
+            </label>
+          ))}
+        </section>
+      )}
 
       <section className="sidebar-section project-section">
         <div className="sidebar-section-title">Project</div>
-        <button className="sidebar-btn" disabled={!state.imagePath} onClick={onSave}>
-          <span className="sidebar-btn-icon">💾</span><span>Save Project</span>
+        <button className="sidebar-btn" disabled={!state.imagePath || isSaving} onClick={onSave} aria-busy={isSaving}>
+          <span className="sidebar-btn-icon">{isSaving ? <span className="inline-spinner" /> : '💾'}</span>
+          <span>{isSaving ? 'Preparing Project…' : 'Save Project'}</span>
         </button>
         <button className="sidebar-btn" disabled={!state.imagePath || !committed} onClick={onExport}>
           <span className="sidebar-btn-icon">📤</span><span>Export Final</span>

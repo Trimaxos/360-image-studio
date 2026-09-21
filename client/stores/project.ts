@@ -3,11 +3,14 @@ import type {
   AiModelOption,
   GeneratedVariant,
   Horizon,
+  ImageMode,
   Layer,
+  LayerVariant,
   SelectionDraft,
   ViewPose,
 } from '../../shared/types';
 import type { WorkflowState } from './workflow';
+import { detectImageMode } from '../lib/image-mode';
 
 export interface RectSelect {
   x: number;
@@ -18,8 +21,24 @@ export interface RectSelect {
   nativeH: number;
 }
 
-export type ActiveTool = 'brush' | 'rect' | 'lasso' | null;
+export type ActiveTool = 'rect' | null;
 export type ViewMode = 'viewer' | 'canvas';
+
+/**
+ * A user-drawn region within the currently displayed canvas-edit image.
+ * Generate still sends the AI the *full* image (so it has real scene context
+ * instead of an isolated crop), but the result is only kept within this
+ * region — everywhere else reverts to the original (see blendRegionResult).
+ * For models with real inpainting mask support, `maskBase64` is also sent as
+ * the AI's own mask so it's guided to edit there directly.
+ */
+export interface RegionEdit {
+  /** The drawn lasso outline, in full-image pixel space — used to redraw
+   *  exactly what the user traced (see CanvasEditor's indicator). */
+  points: { x: number; y: number }[];
+  /** Full-image-sized grayscale mask rasterized from `points` (white = inside). */
+  maskBase64: string;
+}
 
 interface EditSnapshot {
   layer: Layer | null;
@@ -30,6 +49,7 @@ export interface ProjectState {
   imagePath: string | null;
   imageWidth: number;
   imageHeight: number;
+  imageMode: ImageMode;
   layers: Layer[];
   horizon: Horizon;
   workflow: WorkflowState;
@@ -40,14 +60,15 @@ export interface ProjectState {
   activeLayerId: string | null;
   rectSelect: RectSelect | null;
   selectionDraft: SelectionDraft | null;
+  regionEdit: RegionEdit | null;
   editSnapshot: EditSnapshot | null;
   dirty: boolean;
+  hasUnsavedChanges: boolean;
   generatedVariants: GeneratedVariant[];
   selectedVariantId: string | null;
   selectedModel: AiModelOption | null;
   previewImage: string | null;
   previewLayer: Partial<Layer> | null;
-  getMaskBase64: (() => string | null) | null;
 
   openImage(path: string, width: number, height: number): void;
   updateViewPose(pose: Partial<ViewPose>): void;
@@ -60,15 +81,29 @@ export interface ProjectState {
   setRectSelect(rect: RectSelect | null): void;
   setViewLock(lock: ViewPose | null): void;
   setViewMode(mode: ViewMode): void;
+  setImageMode(mode: ImageMode): void;
   setHorizon(horizon: Partial<Horizon>): void;
   setPreview(imageBase64: string | null, layer?: Partial<Layer>): void;
-  setGetMaskBase64(fn: (() => string | null) | null): void;
   setSelectionDraft(selection: SelectionDraft | null): void;
+  setRegionEdit(region: RegionEdit | null): void;
   markDirty(): void;
+  markProjectSaved(): void;
   setSelectedModel(model: AiModelOption | null): void;
   addGeneratedVariant(variant: GeneratedVariant): void;
   selectVariant(id: string | null): void;
   clearVariants(): void;
+  // Variant management (v4)
+  addVariantToLayer(layerId: string, variant: LayerVariant): void;
+  selectVariantForEditing(layerId: string, variantId: string): void;
+  selectOriginalVariant(layerId: string): void;
+  updateVariantMask(layerId: string, variantId: string, mask: LayerVariant['visibilityMask']): void;
+  updateVariantResult(layerId: string, variantId: string, result: {
+    resultImageId: string; width: number; height: number;
+  }): void;
+  removeVariantFromLayer(layerId: string, variantId: string): void;
+  /** Variant vừa import lệch tỉ lệ, cần tự mở trình căn chỉnh (transform) */
+  pendingFitVariant: { layerId: string; variantId: string } | null;
+  setPendingFitVariant(value: { layerId: string; variantId: string } | null): void;
   leaveCanvas(choice: 'save' | 'discard'): void;
   addLayer(layer: Layer): void;
   updateLayer(id: string, patch: Partial<Layer>): void;
@@ -85,6 +120,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   imagePath: null,
   imageWidth: 0,
   imageHeight: 0,
+  imageMode: '360',
   layers: [],
   horizon: { ...defaultHorizon },
   workflow: 'empty',
@@ -95,19 +131,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   activeLayerId: null,
   rectSelect: null,
   selectionDraft: null,
+  regionEdit: null,
   editSnapshot: null,
   dirty: false,
+  hasUnsavedChanges: false,
   generatedVariants: [],
   selectedVariantId: null,
   selectedModel: null,
   previewImage: null,
   previewLayer: null,
-  getMaskBase64: null,
 
   openImage: (imagePath, imageWidth, imageHeight) => set({
     imagePath,
     imageWidth,
     imageHeight,
+    imageMode: detectImageMode(imageWidth, imageHeight),
     layers: [],
     workflow: 'viewing',
     viewPose: { ...defaultPose },
@@ -115,9 +153,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     activeTool: null,
     selectionDraft: null,
     generatedVariants: [],
+    hasUnsavedChanges: true,
   }),
   updateViewPose: (pose) => set((state) => state.workflow === 'viewing'
-    ? { viewPose: { ...state.viewPose, ...pose }, horizon: { ...state.horizon, ...pose } }
+    ? { viewPose: { ...state.viewPose, ...pose }, horizon: { ...state.horizon, ...pose }, hasUnsavedChanges: true }
     : {}),
   enterRectSelect: (sourceView) => set((state) => ({
     workflow: 'rect-select',
@@ -135,31 +174,38 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       type: selection.sourceView === '360' ? 'perspective' : 'flat',
       visible: true,
       ...selection.viewPose,
-      tileCoords: { x: 0, y: 0, w: perspWidth, h: perspHeight },
+      tileCoords: selection.sourceView === 'flat'
+        ? { x: selection.tileCoords.x, y: selection.tileCoords.y, w: perspWidth, h: perspHeight }
+        : { x: 0, y: 0, w: perspWidth, h: perspHeight },
       maskData: [],
       prompt: selection.prompt,
       resultImageId,
       status: 'draft',
       selection,
+      variants: [],
     };
     return {
       layers: [...state.layers, layer],
       activeLayerId: layerId,
       workflow: 'canvas-edit',
       selectionDraft: selection,
-      activeTool: 'brush',
+      regionEdit: null,
+      activeTool: null,
       editSnapshot: { layer: null, selection },
       dirty: false,
+      hasUnsavedChanges: true,
     };
   }),
   openLayerEditor: (id) => set((state) => {
+    if (['canvas-edit', 'generating', 'ai-review'].includes(state.workflow)) return {};
     const layer = state.layers.find((item) => item.id === id);
     if (!layer) return {};
     return {
       workflow: 'canvas-edit',
       activeLayerId: id,
-      activeTool: 'brush',
+      activeTool: null,
       selectionDraft: layer.selection ?? null,
+      regionEdit: null,
       editSnapshot: { layer: structuredClone(layer), selection: layer.selection ?? null },
       dirty: false,
       generatedVariants: [],
@@ -172,19 +218,109 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setRectSelect: (rectSelect) => set({ rectSelect }),
   setViewLock: (viewLock) => set({ viewLock }),
   setViewMode: (viewMode) => set({ viewMode }),
+  setImageMode: (imageMode) => set({ imageMode, hasUnsavedChanges: true }),
   setHorizon: (horizon) => get().updateViewPose(horizon),
   setPreview: (previewImage, previewLayer) => set({ previewImage, previewLayer: previewLayer ?? null }),
-  setGetMaskBase64: (getMaskBase64) => set({ getMaskBase64 }),
-  setSelectionDraft: (selectionDraft) => set({ selectionDraft, dirty: true }),
-  markDirty: () => set({ dirty: true }),
+  setSelectionDraft: (selectionDraft) => set({ selectionDraft, dirty: true, hasUnsavedChanges: true }),
+  setRegionEdit: (regionEdit) => set({ regionEdit }),
+  markDirty: () => set({ dirty: true, hasUnsavedChanges: true }),
+  markProjectSaved: () => set({ hasUnsavedChanges: false }),
   setSelectedModel: (selectedModel) => set({ selectedModel }),
   addGeneratedVariant: (variant) => set((state) => ({
     workflow: 'ai-review',
     generatedVariants: [...state.generatedVariants, variant],
     selectedVariantId: variant.id,
+    hasUnsavedChanges: true,
   })),
   selectVariant: (selectedVariantId) => set({ selectedVariantId }),
   clearVariants: () => set({ generatedVariants: [], selectedVariantId: null, previewImage: null }),
+  addVariantToLayer: (layerId, variant) => set((state) => ({
+    layers: state.layers.map((layer) =>
+      layer.id === layerId
+        ? { ...layer, variants: [...(layer.variants ?? []), variant] }
+        : layer
+    ),
+    hasUnsavedChanges: true,
+  })),
+  selectVariantForEditing: (layerId, variantId) => set((state) => ({
+    layers: state.layers.map((layer) => layer.id === layerId
+      ? {
+        ...layer,
+        // A layer-level panorama cache must always belong to the variant that
+        // is currently selected. Never keep the previously selected cache.
+        equirectImageId: (() => {
+          const variants = layer.variants ?? [];
+          const deselect = variants.some((variant) => variant.id === variantId && variant.applied);
+          return deselect
+            ? undefined
+            : variants.find((variant) => variant.id === variantId)?.equirectImageId;
+        })(),
+        variants: (() => {
+          const variants = layer.variants ?? [];
+          const deselect = variants.some((variant) => variant.id === variantId && variant.applied);
+          return variants.map((variant) => ({
+            ...variant,
+            applied: deselect ? false : variant.id === variantId,
+          }));
+        })(),
+      }
+      : layer),
+    selectedVariantId: null,
+    hasUnsavedChanges: true,
+  })),
+  selectOriginalVariant: (layerId) => set((state) => ({
+    layers: state.layers.map((layer) => layer.id === layerId
+      ? {
+        ...layer,
+        equirectImageId: undefined,
+        variants: (layer.variants ?? []).map((variant) => ({ ...variant, applied: false })),
+      }
+      : layer),
+    selectedVariantId: null,
+    hasUnsavedChanges: true,
+  })),
+  updateVariantMask: (layerId, variantId, mask) => set((state) => ({
+    layers: state.layers.map((layer) => layer.id === layerId
+      ? {
+        ...layer,
+        equirectImageId: undefined,
+        variants: (layer.variants ?? []).map((variant) => variant.id === variantId
+          ? { ...variant, visibilityMask: mask, equirectImageId: undefined }
+          : variant),
+      }
+      : layer),
+    hasUnsavedChanges: true,
+  })),
+  updateVariantResult: (layerId, variantId, result) => set((state) => ({
+    layers: state.layers.map((layer) => layer.id === layerId
+      ? {
+        ...layer,
+        equirectImageId: undefined,
+        variants: (layer.variants ?? []).map((variant) => variant.id === variantId
+          ? {
+            ...variant,
+            resultImageId: result.resultImageId,
+            width: result.width,
+            height: result.height,
+            needsFit: false,
+            visibilityMask: undefined,
+            equirectImageId: undefined,
+          }
+          : variant),
+      }
+      : layer),
+    hasUnsavedChanges: true,
+  })),
+  pendingFitVariant: null,
+  setPendingFitVariant: (pendingFitVariant) => set({ pendingFitVariant }),
+  removeVariantFromLayer: (layerId, variantId) => set((state) => ({
+    layers: state.layers.map((layer) =>
+      layer.id === layerId
+        ? { ...layer, variants: (layer.variants ?? []).filter((v) => v.id !== variantId) }
+        : layer
+    ),
+    hasUnsavedChanges: true,
+  })),
   leaveCanvas: (choice) => set((state) => {
     let layers = state.layers;
     let selectionDraft = state.selectionDraft;
@@ -193,18 +329,34 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ? state.editSnapshot.layer!
         : layer);
       selectionDraft = state.editSnapshot.selection;
+    } else if (choice === 'discard' && state.activeLayerId && !state.editSnapshot?.layer) {
+      // A new layer never goes back to a snapshot. If the user already applied
+      // a variant, commit it — draft layers are filtered out of the view
+      // preview, so discarding would silently hide the applied result.
+      const active = state.layers.find((layer) => layer.id === state.activeLayerId);
+      if ((active?.variants ?? []).some((variant) => variant.applied)) {
+        layers = layers.map((layer) => layer.id === state.activeLayerId
+          ? { ...layer, status: 'committed' as const }
+          : layer);
+      }
     } else if (choice === 'save' && state.activeLayerId) {
       // Update existing layer (created on Apply Rect) with latest selection state
       const draft = state.selectionDraft;
       if (draft) {
         layers = layers.map((layer): Layer => layer.id === state.activeLayerId
-          ? { ...layer, prompt: draft.prompt, selection: draft, status: 'committed' as const }
+          ? {
+            ...layer,
+            prompt: draft.prompt,
+            selection: draft,
+            status: 'committed' as const,
+          }
           : layer);
       }
     }
     return {
       layers,
       selectionDraft,
+      regionEdit: null,
       workflow: 'viewing',
       activeTool: null,
       activeLayerId: null,
@@ -218,18 +370,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   }),
   addLayer: (layer) => set((state) => ({
     layers: [...state.layers, { ...layer, visible: layer.visible ?? true }],
+    hasUnsavedChanges: true,
   })),
   updateLayer: (id, patch) => set((state) => ({
     layers: state.layers.map((layer) => layer.id === id ? { ...layer, ...patch } : layer),
+    hasUnsavedChanges: true,
   })),
   removeLayer: (id) => set((state) => ({
     layers: state.layers.filter((layer) => layer.id !== id),
     activeLayerId: state.activeLayerId === id ? null : state.activeLayerId,
+    hasUnsavedChanges: true,
   })),
+  // Note: variant cache files are NOT deleted on removeLayer to avoid
+  // accidental data loss. Cache dir is cleaned on reset.
   toggleLayerVisibility: (id) => set((state) => ({
     layers: state.layers.map((layer) => layer.id === id
       ? { ...layer, visible: layer.visible === false }
       : layer),
+    hasUnsavedChanges: true,
   })),
   reorderLayer: (id, newOrder) => set((state) => {
     const target = state.layers.find((layer) => layer.id === id);
@@ -246,12 +404,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         }
         return layer;
       }),
+      hasUnsavedChanges: true,
     };
   }),
   reset: () => set({
     imagePath: null,
     imageWidth: 0,
     imageHeight: 0,
+    imageMode: '360',
     layers: [],
     horizon: { ...defaultHorizon },
     workflow: 'empty',
@@ -262,12 +422,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     activeLayerId: null,
     rectSelect: null,
     selectionDraft: null,
+    regionEdit: null,
     editSnapshot: null,
     dirty: false,
+    hasUnsavedChanges: false,
     generatedVariants: [],
     selectedVariantId: null,
     previewImage: null,
     previewLayer: null,
-    getMaskBase64: null,
+    pendingFitVariant: null,
   }),
 }));

@@ -9,6 +9,17 @@ test('opening an image starts viewing at fov 90', () => {
   const state = useProjectStore.getState();
   assert.equal(state.workflow, 'viewing');
   assert.equal(state.viewPose.fov, 90);
+  assert.equal(state.hasUnsavedChanges, true);
+});
+
+test('saving the project clears the unsaved marker until the next change', () => {
+  useProjectStore.getState().reset();
+  useProjectStore.getState().openImage('/tmp/pano.jpg', 4000, 2000);
+  useProjectStore.getState().markProjectSaved();
+  assert.equal(useProjectStore.getState().hasUnsavedChanges, false);
+
+  useProjectStore.getState().updateViewPose({ yaw: 15 });
+  assert.equal(useProjectStore.getState().hasUnsavedChanges, true);
 });
 
 test('leaving canvas clears temporary generated variants', () => {
@@ -40,4 +51,188 @@ test('Back after Apply keeps the committed layer when editor is clean', () => {
   });
   useProjectStore.getState().leaveCanvas('discard');
   assert.equal(useProjectStore.getState().layers[0].resultImageId, 'new');
+});
+
+test('cannot switch to another layer while editing', () => {
+  const makeLayer = (id: string, order: number): Layer => ({
+    id, order, type: 'flat', visible: true,
+    yaw: 0, pitch: 0, roll: 0, fov: 90,
+    tileCoords: { x: 0, y: 0, w: 10, h: 10 },
+    maskData: [], prompt: '', resultImageId: id, status: 'committed',
+  });
+  useProjectStore.setState({
+    workflow: 'canvas-edit',
+    layers: [makeLayer('active', 1), makeLayer('other', 2)],
+    activeLayerId: 'active',
+  });
+
+  useProjectStore.getState().openLayerEditor('other');
+
+  assert.equal(useProjectStore.getState().activeLayerId, 'active');
+  assert.equal(useProjectStore.getState().workflow, 'canvas-edit');
+});
+
+test('selecting Original turns off every generated variant', () => {
+  const layer: Layer = {
+    id: 'layer', order: 1, type: 'flat', visible: true,
+    yaw: 0, pitch: 0, roll: 0, fov: 90,
+    tileCoords: { x: 0, y: 0, w: 10, h: 10 },
+    maskData: [], prompt: '', resultImageId: 'original', status: 'committed',
+    variants: [
+      {
+        id: 'ai', resultImageId: 'generated', source: 'ai-generated', applied: true,
+        width: 10, height: 10, createdAt: 1,
+      },
+    ],
+  };
+  useProjectStore.setState({ layers: [layer], selectedVariantId: 'ai' });
+
+  useProjectStore.getState().selectOriginalVariant('layer');
+
+  assert.equal(useProjectStore.getState().layers[0].variants?.[0].applied, false);
+  assert.equal(useProjectStore.getState().selectedVariantId, null);
+});
+
+test('clicking the selected variant again deselects it and shows Original', () => {
+  const layer: Layer = {
+    id: 'layer', order: 1, type: 'flat', visible: true,
+    yaw: 0, pitch: 0, roll: 0, fov: 90,
+    tileCoords: { x: 0, y: 0, w: 10, h: 10 },
+    maskData: [], prompt: '', resultImageId: 'original', status: 'committed',
+    variants: [
+      {
+        id: 'ai', resultImageId: 'generated', source: 'ai-generated', applied: true,
+        width: 10, height: 10, createdAt: 1,
+      },
+    ],
+  };
+  useProjectStore.setState({ layers: [layer] });
+
+  useProjectStore.getState().selectVariantForEditing('layer', 'ai');
+
+  assert.equal(useProjectStore.getState().layers[0].variants?.[0].applied, false);
+});
+
+test('switching variants never reuses the previous panorama cache', () => {
+  const layer: Layer = {
+    id: 'layer', order: 1, type: 'perspective', visible: true,
+    yaw: 0, pitch: 0, roll: 0, fov: 90,
+    tileCoords: { x: 0, y: 0, w: 10, h: 10 },
+    maskData: [], prompt: '', resultImageId: 'original', status: 'committed',
+    equirectImageId: 'people-panorama',
+    variants: [
+      {
+        id: 'no-people', resultImageId: 'arch-only', source: 'ai-generated', applied: false,
+        width: 10, height: 10, createdAt: 1,
+      },
+      {
+        id: 'people', resultImageId: 'arch-people', source: 'ai-generated', applied: true,
+        equirectImageId: 'people-panorama', width: 10, height: 10, createdAt: 2,
+      },
+    ],
+  };
+  useProjectStore.setState({ layers: [layer] });
+
+  useProjectStore.getState().selectVariantForEditing('layer', 'no-people');
+
+  const updated = useProjectStore.getState().layers[0];
+  assert.equal(updated.equirectImageId, undefined);
+  assert.equal(updated.variants?.find((variant) => variant.id === 'no-people')?.applied, true);
+  assert.equal(updated.variants?.find((variant) => variant.id === 'people')?.applied, false);
+});
+
+test('committing a manual fit replaces the variant image and clears the flag', () => {
+  const layer: Layer = {
+    id: 'layer', order: 1, type: 'flat', visible: true,
+    yaw: 0, pitch: 0, roll: 0, fov: 90,
+    tileCoords: { x: 0, y: 0, w: 10, h: 10 },
+    maskData: [], prompt: '', resultImageId: 'original', status: 'committed',
+    variants: [
+      {
+        id: 'imported', resultImageId: 'full-size', source: 'imported', applied: true,
+        width: 20, height: 10, needsFit: true, createdAt: 1,
+      },
+    ],
+  };
+  useProjectStore.setState({ layers: [layer] });
+
+  useProjectStore.getState().updateVariantResult('layer', 'imported', {
+    resultImageId: 'cropped', width: 10, height: 10,
+  });
+
+  const updated = useProjectStore.getState().layers[0].variants?.[0];
+  assert.equal(updated?.resultImageId, 'cropped');
+  assert.equal(updated?.width, 10);
+  assert.equal(updated?.height, 10);
+  assert.equal(updated?.needsFit, false);
+});
+
+// Regression: "Don't Save" on a new layer left an applied variant on a draft
+// layer, which the view preview filters out — the result silently disappeared.
+test('discarding a new layer keeps an applied variant committed for the view', () => {
+  useProjectStore.getState().reset();
+  useProjectStore.getState().openImage('/tmp/flat.jpg', 1920, 1080);
+  useProjectStore.getState().createPerspectiveLayer({
+    sourceView: 'flat',
+    mode: 'free-select',
+    rect: { x: 0, y: 0, width: 100, height: 100 },
+    viewport: { width: 800, height: 600 },
+    tileCoords: { x: 10, y: 20, w: 400, h: 300 },
+    viewPose: { yaw: 0, pitch: 0, roll: 0, fov: 90 },
+    prompt: '',
+  }, '', 400, 300);
+  const layerId = useProjectStore.getState().activeLayerId!;
+  useProjectStore.getState().addVariantToLayer(layerId, {
+    id: 'v1', resultImageId: 'hash1', source: 'ai-generated',
+    applied: false, width: 400, height: 300, createdAt: 1,
+  });
+  useProjectStore.getState().selectVariantForEditing(layerId, 'v1');
+  useProjectStore.getState().setSelectionDraft({
+    sourceView: 'flat',
+    mode: 'free-select',
+    rect: { x: 0, y: 0, width: 100, height: 100 },
+    viewport: { width: 800, height: 600 },
+    tileCoords: { x: 10, y: 20, w: 400, h: 300 },
+    viewPose: { yaw: 0, pitch: 0, roll: 0, fov: 90 },
+    prompt: 'remove x',
+  });
+
+  useProjectStore.getState().leaveCanvas('discard');
+
+  const layer = useProjectStore.getState().layers.find((item) => item.id === layerId);
+  assert.equal(layer?.status, 'committed');
+  assert.equal(layer?.variants?.find((item) => item.id === 'v1')?.applied, true);
+});
+
+test('opening a 2:1 image selects 360 mode', () => {
+  useProjectStore.getState().reset();
+  useProjectStore.getState().openImage('/tmp/pano.jpg', 4000, 2000);
+  assert.equal(useProjectStore.getState().imageMode, '360');
+});
+
+test('opening a regular photo selects flat mode', () => {
+  useProjectStore.getState().reset();
+  useProjectStore.getState().openImage('/tmp/photo.jpg', 1920, 1080);
+  assert.equal(useProjectStore.getState().imageMode, 'flat');
+});
+
+test('setImageMode overrides the detected mode and marks unsaved changes', () => {
+  useProjectStore.getState().reset();
+  useProjectStore.getState().openImage('/tmp/photo.jpg', 1920, 1080);
+  useProjectStore.getState().markProjectSaved();
+  useProjectStore.getState().setImageMode('360');
+  assert.equal(useProjectStore.getState().imageMode, '360');
+  assert.equal(useProjectStore.getState().hasUnsavedChanges, true);
+});
+
+test('reset returns to the default 360 mode', () => {
+  useProjectStore.setState({ imageMode: 'flat' });
+  useProjectStore.getState().reset();
+  assert.equal(useProjectStore.getState().imageMode, '360');
+});
+
+test('setImageMode can switch to flat', () => {
+  useProjectStore.getState().reset();
+  useProjectStore.getState().setImageMode('flat');
+  assert.equal(useProjectStore.getState().imageMode, 'flat');
 });

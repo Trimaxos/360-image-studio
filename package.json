@@ -11,14 +11,7 @@
     "dev": "vite",
     "build": "vite build",
     "server": "tsx server/index.ts",
-    "start": "npm run build && npm run server",
-    "local-ai:build": "bash scripts/local-ai-build.sh",
-    "local-ai:prepare": "bash scripts/local-ai-prepare-assets.sh",
-    "local-ai:bake": "bash scripts/local-ai-bake-assets.sh",
-    "local-ai:run": "bash scripts/local-ai-run.sh",
-    "local-ai:stop": "bash scripts/local-ai-stop.sh",
-    "local-ai:save": "bash scripts/local-ai-save.sh",
-    "local-ai:load": "bash scripts/local-ai-load.sh"
+    "start": "npm run build && npm run server"
   },
   "repository": {
     "type": "git",
@@ -32,26 +25,32 @@
   },
   "homepage": "https://github.com/Trimaxos/360-image-studio#readme",
   "dependencies": {
+    "adm-zip": "^0.6.0",
+    "archiver": "^8.0.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "multer": "^2.2.0",
-    "sharp": "^0.35.3"
+    "sharp": "^0.35.3",
+    "tsx": "^4.23.1"
   },
   "devDependencies": {
     "@photo-sphere-viewer/core": "^5.15.0",
     "@photo-sphere-viewer/markers-plugin": "^5.15.0",
+    "@types/adm-zip": "^0.5.8",
+    "@types/archiver": "^8.0.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/multer": "^2.2.0",
     "@types/node": "^26.1.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.185.1",
     "@vitejs/plugin-react": "^6.0.4",
     "fabric": "^6.9.1",
+    "jsdom": "^20.0.3",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "tsx": "^4.23.1",
     "typescript": "^7.0.2",
     "vite": "^8.1.5",
     "zustand": "^5.0.14"

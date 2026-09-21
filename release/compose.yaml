@@ -1,0 +1,27 @@
+name: 360-image-studio
+
+services:
+  image-studio:
+    image: 360-image-studio:latest
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      HOME: /data
+      CACHE_DIR: /data/cache
+    ports:
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - image-studio-data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  image-studio-data:

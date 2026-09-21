@@ -4,9 +4,9 @@ import path from 'path';
 import fs from 'fs/promises';
 import multer from 'multer';
 import sharp from 'sharp';
-import { openImage, getTile, serveImage, exportImage, CACHE_DIR } from '../services/image-processor';
-import { renderPerspective, calcPerspectiveResolution } from '../services/perspective-projector';
-import type { ImageOpenRequest, ImageOpenResponse, TileRequest, ExportRequest, PerspectiveRenderRequest } from '../../shared/types';
+import { openImage, getTile, serveImage, exportImage, applyVisibilityMask, CACHE_DIR } from '../services/image-processor';
+import { renderPerspective, reprojectToEquirectangular } from '../services/perspective-projector';
+import type { ImageOpenRequest, ImageOpenResponse, ExportRequest, PerspectiveRenderRequest, ReprojectRequest } from '../../shared/types';
 
 export const imageRouter = Router();
 
@@ -82,7 +82,7 @@ imageRouter.post('/cache-result', async (req, res) => {
 
 imageRouter.post('/perspective-render', async (req, res) => {
   try {
-    const { imagePath, viewPose, viewport, rect, mode } = req.body as PerspectiveRenderRequest;
+    const { imagePath, layers, viewPose, viewport, rect, mode } = req.body as PerspectiveRenderRequest;
     if (!imagePath?.trim()) return res.status(400).json({ error: 'imagePath is required' });
     if (!viewPose || viewPose.fov === undefined) return res.status(400).json({ error: 'viewPose with fov is required' });
     if (!viewport?.width || !viewport?.height) return res.status(400).json({ error: 'viewport is required' });
@@ -98,19 +98,123 @@ imageRouter.post('/perspective-render', async (req, res) => {
       height: metadata.height ?? 4096,
     };
 
-    const result = await renderPerspective(imagePath, viewPose, viewport, effectiveRect, panoramaSize);
+    const scaleFactor = (req.body as any).scaleFactor ?? 1;
+    let renderSource = imagePath;
+    let compositeTempPath: string | undefined;
+    try {
+      if (Array.isArray(layers) && layers.length > 0) {
+        compositeTempPath = path.join(CACHE_DIR, `layer-source-${randomUUID()}.png`);
+        const compositeBuffer = await exportImage(
+          imagePath,
+          'png',
+          95,
+          layers,
+          { yaw: 0, pitch: 0, roll: 0 },
+        );
+        await fs.writeFile(compositeTempPath, compositeBuffer);
+        renderSource = compositeTempPath;
+      }
 
-    // Cache the rendered perspective
-    const hash = createHash('sha256').update(result.buffer).digest('hex');
+      const result = await renderPerspective(renderSource, viewPose, viewport, effectiveRect, panoramaSize, scaleFactor,
+        req.body.alignToModel === true);
+
+      // Cache the rendered perspective
+      const hash = createHash('sha256').update(result.buffer).digest('hex');
+      const cacheFile = path.join(CACHE_DIR, `${hash}.png`);
+      await fs.mkdir(path.dirname(cacheFile), { recursive: true });
+      await fs.writeFile(cacheFile, result.buffer);
+
+      res.json({
+        resultImageId: hash,
+        width: result.width,
+        height: result.height,
+        rect: result.rect,
+      });
+    } finally {
+      if (compositeTempPath) await fs.unlink(compositeTempPath).catch(() => undefined);
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+imageRouter.post('/reproject', async (req, res) => {
+  try {
+    const { resultImageId, selection, imagePath, maskEnabled, maskData, visibilityMask } = req.body as ReprojectRequest;
+    if (!resultImageId || !selection || !imagePath) {
+      return res.status(400).json({ error: 'resultImageId, selection, and imagePath are required' });
+    }
+
+    const resultPath = path.join(CACHE_DIR, `${resultImageId}.png`);
+    await fs.access(resultPath); // verify exists
+
+    const metadata = await sharp(imagePath).metadata();
+    const panoramaSize = {
+      width: metadata.width ?? 8192,
+      height: metadata.height ?? 4096,
+    };
+
+    // Persistently memoize this expensive operation. The key includes every
+    // input that can change the projected pixels, including the manual mask.
+    const visibilityMaskHash = visibilityMask?.base64Mask
+      ? createHash('sha256').update(visibilityMask.base64Mask).digest('hex')
+      : '';
+    const reprojectionKey = createHash('sha256').update(JSON.stringify({
+      version: 3,
+      resultImageId,
+      selection,
+      panoramaSize,
+      maskEnabled,
+      maskData,
+      visibilityMaskHash,
+    })).digest('hex');
+    const reprojectionIndex = path.join(CACHE_DIR, `reproject-${reprojectionKey}.txt`);
+    try {
+      const cachedId = (await fs.readFile(reprojectionIndex, 'utf8')).trim();
+      if (/^[a-f0-9]{64}$/.test(cachedId)) {
+        await fs.access(path.join(CACHE_DIR, `${cachedId}.png`));
+        return res.json({ equirectImageId: cachedId });
+      }
+    } catch {
+      // Cache miss: continue with reprojection.
+    }
+
+    // Reconstruct minimal layer from selection + mask state for reprojection
+    const layer = { selection, maskEnabled, maskData } as any;
+
+    let reprojectionSource = resultPath;
+    let maskedTempPath: string | undefined;
+    if (visibilityMask?.base64Mask) {
+      const resultMetadata = await sharp(resultPath).metadata();
+      const width = resultMetadata.width ?? 1;
+      const height = resultMetadata.height ?? 1;
+      const masked = await applyVisibilityMask(
+        resultPath,
+        visibilityMask.base64Mask,
+        0,
+        width,
+        height,
+      );
+      maskedTempPath = path.join(CACHE_DIR, `masked-reproject-${randomUUID()}.png`);
+      await fs.writeFile(maskedTempPath, masked);
+      reprojectionSource = maskedTempPath;
+    }
+
+    let reprojected: Buffer;
+    try {
+      reprojected = await reprojectToEquirectangular(reprojectionSource, layer, panoramaSize);
+    } finally {
+      if (maskedTempPath) await fs.unlink(maskedTempPath).catch(() => undefined);
+    }
+
+    // Cache the reprojected equirectangular buffer
+    const hash = createHash('sha256').update(reprojected).digest('hex');
     const cacheFile = path.join(CACHE_DIR, `${hash}.png`);
     await fs.mkdir(path.dirname(cacheFile), { recursive: true });
-    await fs.writeFile(cacheFile, result.buffer);
+    await fs.writeFile(cacheFile, reprojected);
+    await fs.writeFile(reprojectionIndex, hash, 'utf8');
 
-    res.json({
-      resultImageId: hash,
-      width: result.width,
-      height: result.height,
-    });
+    res.json({ equirectImageId: hash });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -145,17 +249,25 @@ imageRouter.post('/upload', upload.single('image'), async (req, res) => {
   }
 });
 
+const EXPORT_MIME: Record<string, string> = {
+  jpeg: 'image/jpeg',
+  jpg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  avif: 'image/avif',
+};
+
 imageRouter.post('/export', async (req, res) => {
   try {
     const body = req.body as ExportRequest;
-    if (!body.path || !body.outputPath) {
-      return res.status(400).json({ error: 'path and outputPath are required' });
+    if (!body.path || !body.format) {
+      return res.status(400).json({ error: 'path and format are required' });
     }
-    await exportImage(
-      body.path, body.outputPath, body.format, body.quality,
+    const buffer = await exportImage(
+      body.path, body.format, body.quality,
       body.layers, body.horizon
     );
-    res.json({ success: true, outputPath: body.outputPath });
+    res.type(EXPORT_MIME[body.format]).send(buffer);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -164,21 +276,16 @@ imageRouter.post('/export', async (req, res) => {
 imageRouter.post('/preview', async (req, res) => {
   const { path: imagePath, layers } = req.body as Pick<ExportRequest, 'path' | 'layers'>;
   if (!imagePath) return res.status(400).json({ error: 'path is required' });
-  const previewPath = path.join(CACHE_DIR, `preview-${randomUUID()}.png`);
   try {
-    await exportImage(
+    const buffer = await exportImage(
       imagePath,
-      previewPath,
       'png',
       95,
       Array.isArray(layers) ? layers : [],
       { yaw: 0, pitch: 0, roll: 0 },
     );
-    const buffer = await fs.readFile(previewPath);
     res.type('image/png').send(buffer);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
-  } finally {
-    await fs.unlink(previewPath).catch(() => undefined);
   }
 });

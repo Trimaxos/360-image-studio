@@ -1,0 +1,12 @@
+.git
+.codegraph
+.env
+artifacts
+dist
+docs
+mockups
+models
+node_modules
+tmp-*
+*.log
+*.360project
