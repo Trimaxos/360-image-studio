@@ -9,3 +9,6 @@ models/*.gguf
 models/flux-fill-base/
 artifacts/*.oci.tar
 .codegraph/
+release/*.tar
+release/*.tar.gz
+release/*.zip

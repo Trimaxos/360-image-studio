@@ -4,6 +4,8 @@ Tài liệu này dành cho máy Windows chạy ứng dụng hoàn toàn tại `h
 
 Bộ cài này đã có sẵn image ứng dụng, **không cần source code và không cần build**.
 
+Tải `360-image-studio-package.zip` trong phần **Assets** tại [Releases](https://github.com/Trimaxos/360-image-studio/releases). Các mục **Source code (zip/tar.gz)** do GitHub tạo tự động không phải bộ cài chứa image.
+
 ## 1. Yêu cầu máy tính
 
 - Windows 10/11 64-bit.

@@ -1,0 +1,17 @@
+[
+  {
+    "file": "sharp-libvips-NOTICES.md",
+    "sourceUrl": "https://raw.githubusercontent.com/lovell/sharp-libvips/4da6d14c0d59866adfb9d8cf52bcaa53846dc4f6/THIRD-PARTY-NOTICES.md",
+    "sha256": "25ffcfa69e28b1913ced27ec778b90f24911a1bb3021253577e8b0af55db0d49"
+  },
+  {
+    "file": "sharp-libvips-versions.properties",
+    "sourceUrl": "https://raw.githubusercontent.com/lovell/sharp-libvips/4da6d14c0d59866adfb9d8cf52bcaa53846dc4f6/versions.properties",
+    "sha256": "cebb421de9568ae3ce8cfd66be62c3da53c2d549232c2e4327d9a9f97276c237"
+  },
+  {
+    "file": "node-LICENSE.txt",
+    "sourceUrl": "https://raw.githubusercontent.com/nodejs/node/v22.23.2/LICENSE",
+    "sha256": "c738ae413cf561f174e34f6961f8ca458aae2369a73640dda6234c629b98bcc4"
+  }
+]
