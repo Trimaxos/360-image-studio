@@ -333,14 +333,39 @@ html, body, #root {
   flex-direction: column;
   flex-shrink: 0;
 }
-.panel-header {
-  padding: 12px;
-  font-weight: 600;
-  font-size: 13px;
+.panel-tabs {
+  display: flex;
+  flex-shrink: 0;
   border-bottom: 1px solid var(--border);
+}
+.panel-tabs button {
+  flex: 1;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
+  gap: 6px;
+  padding: 11px 8px;
+  background: transparent;
+  color: var(--text2);
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.panel-tabs button:hover {
+  color: var(--text);
+}
+.panel-tabs button.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 .layer-count {
   font-size: 11px;
@@ -768,12 +793,93 @@ html, body, #root {
   background: var(--accent);
   color: #fff;
 }
+.modal-btn:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
 .modal-btn-secondary {
   background: var(--border);
   color: #ccc;
 }
 .modal-row input[readonly] {
   cursor: pointer;
+}
+.modal-note {
+  font-size: 12px;
+  color: var(--text2);
+  margin-bottom: 12px;
+}
+/* Help text sits under its control so it lines up with the field column. */
+.modal-help {
+  font-size: 11px;
+  color: var(--text2);
+  margin: -6px 0 12px 104px;
+}
+.modal-error {
+  font-size: 13px;
+  color: #ef5350;
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+}
+.field-value {
+  flex-shrink: 0;
+  width: 44px;
+  text-align: right;
+  font-size: 13px;
+  color: var(--text2);
+  font-variant-numeric: tabular-nums;
+}
+/* A slider is a track, not a text input — undo the generic .modal-row input box. */
+.modal-row input[type="range"] {
+  border: none;
+  background: transparent;
+  padding: 0;
+  accent-color: var(--accent);
+}
+/* Read-only field that opens a picker, styled like the modal's other inputs. */
+.path-picker {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+.path-picker:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.path-picker:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+.path-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.path-value.empty {
+  color: var(--text2);
+  font-style: italic;
+}
+.path-action {
+  flex-shrink: 0;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+/* Vietnamese labels are longer than the 80px default column. */
+.batch-export .modal-row label {
+  width: 92px;
 }
 
 /* ===== Lock Edit Bar ===== */
@@ -937,7 +1043,40 @@ html, body, #root {
   font-size: 12px;
   cursor: default;
 }
+.batch-actions { display: flex; flex-direction: column; flex-shrink: 0; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.batch-actions button { background: var(--panel); color: #fff; border: 1px solid var(--border); border-radius: 5px; padding: 7px 10px; cursor: pointer; font-size: 12px; }
+.batch-actions button:disabled { opacity: .45; cursor: not-allowed; }
+.batch-hint { flex-shrink: 0; margin: 8px 12px; font-size: 11px; color: var(--text2); overflow-wrap: anywhere; }
+.batch-dest { flex-shrink: 0; display: flex; align-items: center; gap: 6px; margin: 0 12px 8px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--panel); color: var(--text2); font-size: 11px; overflow-wrap: anywhere; }
+.batch-items { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 0 12px 12px; }
+.batch-empty { color: var(--text2); font-size: 12px; font-style: italic; }
+.batch-item { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
+.batch-item.active { border-color: var(--accent); }
+.batch-item img { width: 100%; height: 92px; object-fit: contain; background: #111; border-radius: 4px; }
+.batch-item-info { min-width: 0; }
+.batch-item-info strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.batch-item-info small { display: block; color: var(--text2); font-size: 11px; }
+.batch-item-actions { display: flex; gap: 6px; }
+.batch-item-actions button { background: var(--panel); color: #fff; border: 1px solid var(--border); border-radius: 5px; padding: 5px 10px; cursor: pointer; font-size: 12px; }
+.batch-item-actions button:first-child { flex: 1; }
+.batch-item-actions button:disabled { opacity: .45; cursor: not-allowed; }
+.batch-results { display: flex; flex-direction: column; gap: 4px; max-height: 200px; margin-top: 12px; padding: 0; list-style: none; overflow: auto; font-size: 12px; }
+.batch-results li { padding: 6px 8px; border-radius: 4px; background: var(--panel); overflow-wrap: anywhere; }
+.batch-results li.error { background: #542525; }
+.batch-error { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); z-index: 1200; background: #542525; color: #fff; padding: 12px; border-radius: 6px; white-space: pre-wrap; }
+.batch-error button { margin-left: 12px; }
+.batch-confirm { z-index: 1100; }
+.batch-working { position: fixed; inset: 0; z-index: 90; background: #0006; display: flex; justify-content: center; align-items: center; gap: 8px; color: white; }
 .rect-crop-options label { display: flex; align-items: center; gap: 8px; }
+.rect-crop-options select {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: #fff;
+  font: inherit;
+}
+.rect-crop-options > span { display: block; margin-top: 8px; color: #c3d1db; }
 .rect-crop-summary { display: grid; gap: 4px; margin-top: 8px; }
 .rect-crop-summary > span { color: #c3d1db; }
 .selection-rect span {

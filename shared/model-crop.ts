@@ -2,6 +2,24 @@ import type { ViewPose } from './types';
 
 export interface Size { width: number; height: number }
 export interface CropRect extends Size { x: number; y: number }
+/** Round preset ratios as integer multiples of their primitive pair, not a model grid.
+ * Non-preset/free selections retain ordinary pixel rounding. */
+export function roundSelectionSize(width: number, height: number, bounds?: Size): Size {
+  const ratios = [[1, 1], [2, 3], [3, 2], [4, 3], [3, 4], [16, 9], [9, 16],
+    [1, 2], [2, 1], [1, 3], [3, 1]];
+  for (const [w, h] of ratios) {
+    if (Math.abs(width / height - w / h) > 1e-10) continue;
+    const maximum = bounds ? Math.floor(Math.min(bounds.width / w, bounds.height / h)) : Infinity;
+    if (maximum < 1) break; // A sub-unit image cannot contain this exact integer ratio.
+    const factor = Math.min(maximum, Math.max(1, Math.round(height / h)));
+    return { width: w * factor, height: h * factor };
+  }
+  return {
+    width: Math.max(1, Math.min(bounds?.width ?? Infinity, Math.round(width))),
+    height: Math.max(1, Math.min(bounds?.height ?? Infinity, Math.round(height))),
+  };
+}
+
 export const MODEL_MIN_PIXELS = 655_360;
 export const MODEL_MAX_PIXELS = 8_294_400;
 export const MODEL_MAX_EDGE = 3840;
@@ -90,10 +108,8 @@ export function planModelCrop(width: number, height: number): { crop: CropRect; 
 export function calcPerspectiveResolution(
   viewport: Size, pose: ViewPose, rect: CropRect, panorama: Size, scaleFactor = 1,
 ): Size {
-  const height = Math.max(1, Math.round(
-    (rect.height / viewport.height) * (pose.fov * panorama.height / 180) * scaleFactor,
-  ));
-  return { width: Math.max(1, Math.round(height * rect.width / rect.height)), height };
+  const height = (rect.height / viewport.height) * (pose.fov * panorama.height / 180) * scaleFactor;
+  return roundSelectionSize(height * rect.width / rect.height, height);
 }
 
 /** Use continuous native density so preview, rendering and reprojection

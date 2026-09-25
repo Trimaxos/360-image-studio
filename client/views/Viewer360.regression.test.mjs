@@ -6,6 +6,7 @@ const mainSource = await readFile(new URL('../main.tsx', import.meta.url), 'utf8
 const appSource = await readFile(new URL('../App.tsx', import.meta.url), 'utf8');
 const viewerSource = await readFile(new URL('./Viewer360.tsx', import.meta.url), 'utf8');
 const themeSource = await readFile(new URL('../styles/theme.css', import.meta.url), 'utf8');
+const rightSidebarSource = await readFile(new URL('../components/RightSidebar.tsx', import.meta.url), 'utf8');
 
 test('loads the application and Photo Sphere Viewer stylesheets', () => {
   assert.match(mainSource, /import ['"]\.\/styles\/theme\.css['"]/);
@@ -48,9 +49,16 @@ test('keeps file actions from crushing the top-bar tabs', () => {
 });
 
 test('places the prompt bar below the three-column workspace like the mock', () => {
-  const layerPanelIndex = appSource.indexOf('<LayerPanel />');
+  const rightSidebarIndex = appSource.indexOf('<RightSidebar');
   const promptBarIndex = appSource.indexOf('<PromptBar');
 
-  assert.ok(layerPanelIndex >= 0, 'LayerPanel must be rendered');
-  assert.ok(promptBarIndex > layerPanelIndex, 'PromptBar must follow the main workspace');
+  assert.ok(rightSidebarIndex >= 0, 'RightSidebar must be rendered');
+  assert.ok(promptBarIndex > rightSidebarIndex, 'PromptBar must follow the main workspace');
+});
+
+test('keeps layers and batch in one right-hand tabbed panel', () => {
+  assert.match(
+    rightSidebarSource,
+    /role="tablist"[\s\S]*tab === 'layers' \? <LayerPanel \/> : <BatchPanel/,
+  );
 });

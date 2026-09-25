@@ -1,4 +1,4 @@
-import { planModelCrop, planPerspectiveCrop } from '../../shared/model-crop';
+import { planModelCrop, planPerspectiveCrop, roundSelectionSize } from '../../shared/model-crop';
 import type { ViewPose } from '../../shared/types';
 
 export interface Point {
@@ -29,9 +29,21 @@ export function clampPoint(point: Point, bounds: Rect): Point {
   };
 }
 
-export function dragRect(start: Point, end: Point, bounds: Rect): Rect {
+export const SELECTION_RATIOS = ['1:1', '2:3', '3:2', '4:3', '3:4', '16:9', '9:16', '1:2', '2:1', '1:3', '3:1'] as const;
+
+export function dragRect(start: Point, end: Point, bounds: Rect, aspectRatio?: number): Rect {
   const first = clampPoint(start, bounds);
   const last = clampPoint(end, bounds);
+  if (aspectRatio !== undefined) {
+    const dx = last.x - first.x;
+    const dy = last.y - first.y;
+    const maxWidth = dx < 0 ? first.x - bounds.x : bounds.x + bounds.width - first.x;
+    const maxHeight = dy < 0 ? first.y - bounds.y : bounds.y + bounds.height - first.y;
+    const width = Math.min(Math.max(Math.abs(dx), Math.abs(dy) * aspectRatio), maxWidth, maxHeight * aspectRatio);
+    const height = width / aspectRatio;
+    return { x: dx < 0 ? first.x - width : first.x,
+      y: dy < 0 ? first.y - height : first.y, width, height };
+  }
   return {
     x: Math.min(first.x, last.x),
     y: Math.min(first.y, last.y),
@@ -53,10 +65,13 @@ export function containRect(viewport: Size, image: Size): Rect {
 }
 
 export function mapViewportRectToImage(rect: Rect, bounds: Rect, image: Size) {
-  const x = clamp(Math.round((rect.x - bounds.x) * image.width / bounds.width), 0, image.width - 1);
-  const y = clamp(Math.round((rect.y - bounds.y) * image.height / bounds.height), 0, image.height - 1);
-  const width = clamp(Math.round(rect.width * image.width / bounds.width), 1, image.width - x);
-  const height = clamp(Math.round(rect.height * image.height / bounds.height), 1, image.height - y);
+  const { width, height } = roundSelectionSize(
+    rect.width * image.width / bounds.width, rect.height * image.height / bounds.height, image,
+  );
+  // Move the rounded origin inward at image edges instead of clipping one
+  // dimension independently and losing the selected ratio.
+  const x = clamp(Math.round((rect.x - bounds.x) * image.width / bounds.width), 0, image.width - width);
+  const y = clamp(Math.round((rect.y - bounds.y) * image.height / bounds.height), 0, image.height - height);
   return { x, y, w: width, h: height };
 }
 
