@@ -937,7 +937,40 @@ html, body, #root {
   font-size: 12px;
   cursor: default;
 }
+.batch-actions { display: flex; flex-direction: column; flex-shrink: 0; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.batch-actions button { background: var(--panel); color: #fff; border: 1px solid var(--border); border-radius: 5px; padding: 7px 10px; cursor: pointer; font-size: 12px; }
+.batch-actions button:disabled { opacity: .45; cursor: not-allowed; }
+.batch-hint { flex-shrink: 0; margin: 8px 12px; font-size: 11px; color: var(--text2); overflow-wrap: anywhere; }
+.batch-dest { flex-shrink: 0; display: flex; align-items: center; gap: 6px; margin: 0 12px 8px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--panel); color: var(--text2); font-size: 11px; overflow-wrap: anywhere; }
+.batch-items { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 0 12px 12px; }
+.batch-empty { color: var(--text2); font-size: 12px; font-style: italic; }
+.batch-item { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
+.batch-item.active { border-color: var(--accent); }
+.batch-item img { width: 100%; height: 92px; object-fit: contain; background: #111; border-radius: 4px; }
+.batch-item-info { min-width: 0; }
+.batch-item-info strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.batch-item-info small { display: block; color: var(--text2); font-size: 11px; }
+.batch-item-actions { display: flex; gap: 6px; }
+.batch-item-actions button { background: var(--panel); color: #fff; border: 1px solid var(--border); border-radius: 5px; padding: 5px 10px; cursor: pointer; font-size: 12px; }
+.batch-item-actions button:first-child { flex: 1; }
+.batch-item-actions button:disabled { opacity: .45; cursor: not-allowed; }
+.batch-results { display: flex; flex-direction: column; gap: 4px; max-height: 200px; margin-top: 12px; padding: 0; list-style: none; overflow: auto; font-size: 12px; }
+.batch-results li { padding: 6px 8px; border-radius: 4px; background: var(--panel); overflow-wrap: anywhere; }
+.batch-results li.error { background: #542525; }
+.batch-error { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); z-index: 1200; background: #542525; color: #fff; padding: 12px; border-radius: 6px; white-space: pre-wrap; }
+.batch-error button { margin-left: 12px; }
+.batch-confirm { z-index: 1100; }
+.batch-working { position: fixed; inset: 0; z-index: 90; background: #0006; display: flex; justify-content: center; align-items: center; gap: 8px; color: white; }
 .rect-crop-options label { display: flex; align-items: center; gap: 8px; }
+.rect-crop-options select {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: #fff;
+  font: inherit;
+}
+.rect-crop-options > span { display: block; margin-top: 8px; color: #c3d1db; }
 .rect-crop-summary { display: grid; gap: 4px; margin-top: 8px; }
 .rect-crop-summary > span { color: #c3d1db; }
 .selection-rect span {

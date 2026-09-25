@@ -7,7 +7,7 @@ import {
   containRect,
   dragRect,
   mapViewportRectToImage,
-  planAlignedSelection,
+  SELECTION_RATIOS,
   type Size,
   type Point,
   type Rect,
@@ -24,13 +24,12 @@ export default function RectSelectionOverlay({
   const [rect, setRect] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState('');
-  const [autoAlign, setAutoAlign] = useState(true);
+  const [aspectRatio, setAspectRatio] = useState("1:1");
+  const [ratioWidth, ratioHeight] = aspectRatio.split(":").map(Number);
   const [fullFrame, setFullFrame] = useState(false);
   const [viewport, setViewport] = useState<Size>({ width: 0, height: 0 });
   const state = useProjectStore();
   const hasRect = rect.width >= 8 && rect.height >= 8;
-  const canAlign = !!state.selectedModel?.supportsCustomImageSize;
-  const alignToModel = canAlign && autoAlign;
 
   useEffect(() => {
     const element = overlayRef.current!;
@@ -54,17 +53,6 @@ export default function RectSelectionOverlay({
     return () => observer.disconnect();
   }, []);
 
-  let preview: ReturnType<typeof planAlignedSelection> | null = null;
-  let previewError = '';
-  if (hasRect && alignToModel && viewport.width && viewport.height) {
-    try {
-      preview = planAlignedSelection(sourceView, rect, viewport,
-        { width: state.imageWidth, height: state.imageHeight }, state.viewLock ?? state.viewPose);
-    } catch (reason) {
-      previewError = reason instanceof Error ? reason.message : 'Không thể căn khung.';
-    }
-  }
-
   const bounds = (box: DOMRect): Rect => sourceView === 'flat'
     ? containRect(
         { width: box.width, height: box.height },
@@ -79,7 +67,7 @@ export default function RectSelectionOverlay({
     );
   };
   const apply = async () => {
-    if (applyingRef.current || !hasRect || previewError) return;
+    if (applyingRef.current || !hasRect) return;
     applyingRef.current = true;
     const box = overlayRef.current!.getBoundingClientRect();
     const selectionBounds = bounds(box);
@@ -89,20 +77,18 @@ export default function RectSelectionOverlay({
     setError('');
     try {
       const viewPose = state.viewLock ?? state.viewPose;
-      const planned = alignToModel ? planAlignedSelection(sourceView, selected, box,
-        { width: state.imageWidth, height: state.imageHeight }, viewPose) : null;
       const selection: SelectionDraft = {
         sourceView,
         mode,
-        rect: planned?.rect ?? selected,
+        rect: selected,
         viewport: { width: box.width, height: box.height },
-        tileCoords: planned?.tileCoords ?? (sourceView === 'flat'
+        tileCoords: sourceView === 'flat'
           ? mapViewportRectToImage(
               selected,
               selectionBounds,
               { width: state.imageWidth, height: state.imageHeight },
             )
-          : { x: 0, y: 0, w: Math.round(selected.width), h: Math.round(selected.height) }),
+          : { x: 0, y: 0, w: Math.round(selected.width), h: Math.round(selected.height) },
         viewPose,
         prompt: '',
       };
@@ -123,7 +109,7 @@ export default function RectSelectionOverlay({
           rect: selected,
           mode,
           scaleFactor: 1,
-          alignToModel,
+          alignToModel: false,
         });
         // The server's rectangle is authoritative for later reprojection.
         selection.rect = result.rect ?? selection.rect;
@@ -157,44 +143,42 @@ export default function RectSelectionOverlay({
         if (applying) return;
         if (!startRef.current) return;
         const box = overlayRef.current!.getBoundingClientRect();
-        setRect(dragRect(startRef.current, point(event, box), bounds(box)));
+        setRect(dragRect(startRef.current, point(event, box), bounds(box), ratioWidth / ratioHeight));
       }}
       onPointerUp={(event) => {
         if (applying) return;
         if (!startRef.current) return;
         const box = overlayRef.current!.getBoundingClientRect();
-        setRect(dragRect(startRef.current, point(event, box), bounds(box)));
+        setRect(dragRect(startRef.current, point(event, box), bounds(box), ratioWidth / ratioHeight));
         startRef.current = null;
         event.currentTarget.releasePointerCapture(event.pointerId);
       }}
       onPointerCancel={() => { startRef.current = null; }}
     >
-      {hasRect && <div className={`selection-rect ${alignToModel ? 'selection-rect-requested' : ''}`} style={{
+      {hasRect && <div className="selection-rect" style={{
         left: rect.x,
         top: rect.y,
         width: rect.width,
         height: rect.height,
       }}>
-        {!alignToModel && <span>{Math.round(rect.width)} × {Math.round(rect.height)}</span>}
+        <span>{Math.round(rect.width)} × {Math.round(rect.height)}{!fullFrame && ` · ${aspectRatio}`}</span>
       </div>}
-      {preview && <div className="selection-rect selection-rect-aligned" style={{
-        left: preview.rect.x, top: preview.rect.y,
-        width: preview.rect.width, height: preview.rect.height,
-      }} />}
       <div className="rect-actions" onPointerDown={(event) => event.stopPropagation()}>
         <div className="rect-crop-options">
-          {canAlign ? <label>
-            <input type="checkbox" checked={autoAlign} disabled={applying}
-              onChange={(event) => setAutoAlign(event.target.checked)} />
-            Tự căn khung phù hợp model
-          </label> : <span>Crop tự do · {state.selectedModel ? 'Model dùng kích thước mặc định' : 'Chọn model để bật tự căn khung'}</span>}
-          {preview && <div className="rect-crop-summary" role="status">
-            <span>Nét đứt: vùng chọn · Nét liền: crop thực tế</span>
-            <strong>Crop {preview.crop.width} × {preview.crop.height} px · AI {preview.output.width} × {preview.output.height} px</strong>
-            {(preview.output.width !== preview.crop.width || preview.output.height !== preview.crop.height)
-              && <span>{preview.output.width > preview.crop.width ? 'Tự phóng' : 'Tự thu'} độ phân giải, giữ nguyên tỉ lệ và vị trí.</span>}
-          </div>}
-          {previewError && <span role="alert">{previewError}</span>}
+          <label>
+            Tỉ lệ khung
+            <select aria-label="Tỉ lệ khung" value={aspectRatio} disabled={applying}
+              onChange={(event) => {
+                setAspectRatio(event.target.value);
+                setRect({ x: 0, y: 0, width: 0, height: 0 });
+                setFullFrame(false);
+                startRef.current = null;
+                setError('');
+              }}>
+              {SELECTION_RATIOS.map((ratio) => <option key={ratio} value={ratio}>{ratio}</option>)}
+            </select>
+          </label>
+          <span>Chọn tỉ lệ trước khi vẽ khung · Full Frame chọn toàn bộ khung hình</span>
         </div>
         <button disabled={applying} onClick={() => state.leaveCanvas('discard')}>Cancel</button>
         <button disabled={applying} onClick={() => {
@@ -202,7 +186,7 @@ export default function RectSelectionOverlay({
           setFullFrame(true);
           setError('');
         }}>Full Frame</button>
-        <button className="primary" disabled={!hasRect || !!previewError || applying} onClick={() => void apply()}>{applying ? 'Đang chuẩn bị…' : 'Apply Rect'}</button>
+        <button className="primary" disabled={!hasRect || applying} onClick={() => void apply()}>{applying ? 'Đang chuẩn bị…' : 'Apply Rect'}</button>
       </div>
       {applying && (
         <div className="rect-apply-progress" role="status" aria-live="polite">

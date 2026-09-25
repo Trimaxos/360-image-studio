@@ -71,10 +71,9 @@ test('calcPerspectiveResolution full-frame on 8K panorama at 90° FOV', () => {
     { x: 0, y: 0, width: 800, height: 600 },
     { width: 8000, height: 4000 },
   );
-  // outHeight = (600/600) * (90 * 4000 / 180) = 2000
-  // outWidth = 2000 * 800 / 600 = 2667
-  assert.equal(result.height, 2000);
-  assert.equal(result.width, 2667);
+  // Native height 2000 rounds to the nearest exact 4:3 integer pair.
+  assert.equal(result.height, 2001);
+  assert.equal(result.width, 2668);
 });
 
 test('calcPerspectiveResolution free-select on 8K panorama', () => {
@@ -85,10 +84,9 @@ test('calcPerspectiveResolution free-select on 8K panorama', () => {
     { x: 200, y: 150, width: 400, height: 300 },
     { width: 8000, height: 4000 },
   );
-  // outHeight = (300/600) * (90 * 4000 / 180) = 1000
-  // outWidth = 1000 * 400 / 300 = 1333
-  assert.equal(result.height, 1000);
-  assert.equal(result.width, 1333);
+  // Native height 1000 rounds to the nearest exact 4:3 integer pair.
+  assert.equal(result.height, 999);
+  assert.equal(result.width, 1332);
 });
 
 test('calcPerspectiveResolution with narrow FOV produces smaller output', () => {
@@ -123,16 +121,16 @@ test('calcPerspectiveResolution with scaleFactor=1.5 on 8K panorama', () => {
   assert.equal(result.width, 4000);
 });
 
-test('calcPerspectiveResolution default scaleFactor=1 matches legacy', () => {
+test('calcPerspectiveResolution default scaleFactor=1 retains the exact ratio', () => {
   const result = calcPerspectiveResolution(
     { width: 800, height: 600 },
     { yaw: 0, pitch: 0, roll: 0, fov: 90 },
     { x: 0, y: 0, width: 800, height: 600 },
     { width: 8000, height: 4000 },
   );
-  // Default scaleFactor=1: height = 2000, width = 2667
-  assert.equal(result.height, 2000);
-  assert.equal(result.width, 2667);
+  // Default scaleFactor=1 keeps 4:3 instead of independently rounding edges.
+  assert.equal(result.height, 2001);
+  assert.equal(result.width, 2668);
 });
 
 // ---- Lanczos2 (a=2) kernel tests ----
