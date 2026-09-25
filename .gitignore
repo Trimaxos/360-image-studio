@@ -12,3 +12,4 @@ artifacts/*.oci.tar
 release/*.tar
 release/*.tar.gz
 release/*.zip
+.cache/
