@@ -272,6 +272,8 @@ export interface ProjectFile {
   version: 5;
   mode: ImageMode;
   imagePath: string;
+  /** Original upload name, retained when bundle image paths are remapped. */
+  originalName?: string;
   layers: Layer[];
   horizon: Horizon;
 }

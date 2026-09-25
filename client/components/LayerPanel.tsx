@@ -6,10 +6,7 @@ export default function LayerPanel() {
   const editingLayer = ['canvas-edit', 'generating', 'ai-review'].includes(state.workflow);
 
   return (
-    <aside className="layer-panel">
-      <div className="panel-header">
-        Layers <span className="layer-count">{state.layers.length} layer(s)</span>
-      </div>
+    <>
       {!sorted.length ? <p className="layer-empty">Chưa có chỉnh sửa nào</p> : (
         <div className="layer-list">
           {sorted.map((layer) => {
@@ -40,6 +37,6 @@ export default function LayerPanel() {
           );})}
         </div>
       )}
-    </aside>
+    </>
   );
 }

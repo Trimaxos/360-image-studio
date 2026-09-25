@@ -333,14 +333,39 @@ html, body, #root {
   flex-direction: column;
   flex-shrink: 0;
 }
-.panel-header {
-  padding: 12px;
-  font-weight: 600;
-  font-size: 13px;
+.panel-tabs {
+  display: flex;
+  flex-shrink: 0;
   border-bottom: 1px solid var(--border);
+}
+.panel-tabs button {
+  flex: 1;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
+  gap: 6px;
+  padding: 11px 8px;
+  background: transparent;
+  color: var(--text2);
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.panel-tabs button:hover {
+  color: var(--text);
+}
+.panel-tabs button.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 .layer-count {
   font-size: 11px;
@@ -768,12 +793,93 @@ html, body, #root {
   background: var(--accent);
   color: #fff;
 }
+.modal-btn:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
 .modal-btn-secondary {
   background: var(--border);
   color: #ccc;
 }
 .modal-row input[readonly] {
   cursor: pointer;
+}
+.modal-note {
+  font-size: 12px;
+  color: var(--text2);
+  margin-bottom: 12px;
+}
+/* Help text sits under its control so it lines up with the field column. */
+.modal-help {
+  font-size: 11px;
+  color: var(--text2);
+  margin: -6px 0 12px 104px;
+}
+.modal-error {
+  font-size: 13px;
+  color: #ef5350;
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+}
+.field-value {
+  flex-shrink: 0;
+  width: 44px;
+  text-align: right;
+  font-size: 13px;
+  color: var(--text2);
+  font-variant-numeric: tabular-nums;
+}
+/* A slider is a track, not a text input — undo the generic .modal-row input box. */
+.modal-row input[type="range"] {
+  border: none;
+  background: transparent;
+  padding: 0;
+  accent-color: var(--accent);
+}
+/* Read-only field that opens a picker, styled like the modal's other inputs. */
+.path-picker {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+.path-picker:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.path-picker:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+.path-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.path-value.empty {
+  color: var(--text2);
+  font-style: italic;
+}
+.path-action {
+  flex-shrink: 0;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+/* Vietnamese labels are longer than the 80px default column. */
+.batch-export .modal-row label {
+  width: 92px;
 }
 
 /* ===== Lock Edit Bar ===== */
