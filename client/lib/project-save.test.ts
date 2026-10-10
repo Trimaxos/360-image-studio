@@ -322,3 +322,13 @@ test('when the server cannot save, the error reaches the caller and the project 
   await assert.rejects(saveProjectToFolder(), /ENOSPC/);
   assert.equal(useProjectStore.getState().hasUnsavedChanges, true);
 });
+
+test('saving into the projects folder names the file after the image, also for a project that was opened from "<name> (3).360project"', async (t) => {
+  const names: string[] = [];
+  t.mock.method(api.project, 'saveToFolder', async (_project: ProjectFile, name: string) => { names.push(name); return savedAs; });
+  useBatchStore.getState().setCurrentFile({ name: 'Greens 2_hdr (3).360project' });
+
+  await saveProjectToFolder();
+
+  assert.deepEqual(names, ['Greens 2_hdr.360project'], 'the server adds the next (N); the opened file name must not be stacked on');
+});

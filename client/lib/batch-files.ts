@@ -1,5 +1,6 @@
 import type { ProjectFile } from '../../shared/types';
 import { api } from './api';
+import { isAutoMode } from './auto-mode';
 
 export type BatchExportFormat = 'jpg' | 'jpeg' | 'png' | 'webp' | 'avif';
 export interface BatchExportItem {
@@ -84,9 +85,12 @@ export async function updateProjectFile(handle: FileSystemFileHandle, blob: Blob
   }
 }
 
-/** Whether the browser can open files with handles; check before awaiting anything so the click still counts. */
+/**
+ * Whether the browser can open files with handles; check before awaiting anything so the click still counts.
+ * Not in auto mode (?auto=1): the automation cannot click the native dialog, so Load Project uses the plain file input.
+ */
 export function canPickProjectFiles(): boolean {
-  return typeof window !== 'undefined' && typeof window.showOpenFilePicker === 'function';
+  return typeof window !== 'undefined' && typeof window.showOpenFilePicker === 'function' && !isAutoMode();
 }
 
 /** Open .360project files with handles (so Save can write back to them); null when the browser has no such picker. */

@@ -12,6 +12,8 @@ services:
       PORT: 3001
       HOME: /data
       CACHE_DIR: /data/cache
+      # 9router runs on the Windows host, not inside the container
+      NINEROUTER_BASE_URL: http://host.docker.internal:20128/v1
     ports:
       - "127.0.0.1:3001:3001"
     volumes:

@@ -79,9 +79,10 @@ AI_MODEL=fal-ai/flux-2/klein/9b/edit
 DEEPSEEK_API_KEY=your_deepseek_api_key_here
 OPENCODE_API_KEY=your_opencode_go_api_key_here
 PORT=3001
+NINEROUTER_API_KEY=your_9router_api_key_here
 ```
 
-Giữ nguyên `AUTH_USERNAME` và `AUTH_PASSWORD_HASH` nếu quản trị viên không yêu cầu thay đổi.
+`NINEROUTER_API_KEY` là tùy chọn, chỉ cần khi dùng 9router (Codex). 9router phải đang chạy trên chính máy Windows này ở cổng `20128`; ứng dụng trong Docker tự kết nối tới đó.
 
 Không gửi file `.env` cho người ngoài vì file này chứa API key.
 

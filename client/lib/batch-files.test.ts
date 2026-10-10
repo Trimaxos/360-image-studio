@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { ProjectFile } from '../../shared/types';
 import {
-  allocateBatchFile, exportBatchToDirectory, pickBatchDirectory,
+  allocateBatchFile, canPickProjectFiles, exportBatchToDirectory, pickBatchDirectory,
   safeBatchStem, updateProjectFile,
 } from './batch-files';
 
@@ -139,6 +139,23 @@ test('picker reports unsupported browsers and preserves cancellation identity', 
       },
     } });
     await assert.rejects(pickBatchDirectory(), (error) => error === abort);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'window', previous);
+    else Reflect.deleteProperty(globalThis, 'window');
+  }
+});
+
+test('the project picker is offered when the browser has one, but not in auto mode, where the plain file input takes over', () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  const page = (search: string, picker: boolean) => Object.defineProperty(globalThis, 'window', { configurable: true,
+    value: { location: { search }, ...(picker ? { showOpenFilePicker: async () => [] } : {}) } });
+  try {
+    page('', true);
+    assert.equal(canPickProjectFiles(), true);
+    page('', false);
+    assert.equal(canPickProjectFiles(), false, 'a browser without the picker');
+    page('?auto=1', true);
+    assert.equal(canPickProjectFiles(), false, 'the native dialog cannot be clicked by the automation, which uploads through the file input');
   } finally {
     if (previous) Object.defineProperty(globalThis, 'window', previous);
     else Reflect.deleteProperty(globalThis, 'window');

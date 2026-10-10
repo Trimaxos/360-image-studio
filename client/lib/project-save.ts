@@ -183,7 +183,9 @@ export async function saveProjectToFolder(): Promise<{ path: string; name: strin
   const before = useProjectStore.getState();
   if (!before.imagePath) throw new Error('Chưa mở ảnh.');
   if (before.workflow !== 'viewing') throw new Error('Hãy Apply và quay lại màn hình xem trước khi lưu project.');
-  const saved = await api.project.saveToFolder(snapshotProject(), suggestedProjectName());
+  // Named after the image, never after the file the project was opened from: the server adds the next " (N)" itself.
+  const project = snapshotProject();
+  const saved = await api.project.saveToFolder(project, `${safeBatchStem(project.originalName ?? 'project')}.360project`);
   // Never clear changes made while the server was writing an older snapshot.
   const after = useProjectStore.getState();
   if (after.imagePath === before.imagePath && after.layers === before.layers

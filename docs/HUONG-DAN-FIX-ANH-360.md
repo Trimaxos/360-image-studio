@@ -4,11 +4,12 @@ Với mỗi ảnh panorama trong `assets/hdr/`: **(1) xóa chân máy ở nadir,
 
 Cách làm: điều khiển trực tiếp app bằng công cụ Playwright MCP (click, gõ, kéo chuột, chụp màn hình). **Không viết script, không dùng `browser_evaluate` / `browser_run_code_unsafe`, không dựng lại automation.** Phạm vi sửa chỉ gồm chân máy + cửa; **không** chỉnh màu cả phòng.
 
-> **Quy tắc cửa:** mỗi ảnh có bao nhiêu cửa thì fix hết bấy nhiêu. Không tự đánh giá "cửa này ổn" rồi bỏ qua; chỉ bỏ cửa khi PM nói.
+> **Quy tắc cửa:** mỗi ảnh có bao nhiêu cửa thì fix hết bấy nhiêu. Không tự đánh giá "cửa này ổn" rồi bỏ qua; chỉ bỏ cửa khi PM nói. **Cửa phản chiếu trong gương cũng là cửa** (PM chốt 08/10/2026: nó làm xấu ảnh chẳng khác gì cửa bị cháy) và số layer không bị giới hạn: cần bao nhiêu thì tạo bấy nhiêu (chỉ có tối đa 4 lượt gen chạy cùng lúc, phần còn lại xếp hàng).
 
 ## 0. Chuẩn bị (mỗi phiên)
 
 - App chạy ở `http://localhost:3001` (không còn đăng nhập). **Mở bằng `http://localhost:3001/?auto=1`**: menu File có thêm mục lưu tự động (Bước 5); không có `?auto=1` thì menu là bản dành cho người dùng tay. Vừa sửa giao diện thì `npm run build`; vừa sửa server thì dừng cây tiến trình đang nghe cổng 3001 rồi chạy lại `npm run server`.
+- Mở lại project đã lưu để làm tiếp (ví dụ thiếu cửa, hoặc sau khi Chrome sập): mở bằng `?auto=1`, `☰ File` → `📋 Load Project` → `browser_file_upload` với đường dẫn tuyệt đối tới file trong `assets/output/projects` (ở chế độ `?auto=1` không có hộp chọn file của Windows). Chọn lại model; lưu lần sau sẽ ra file mới có số `(N)` kế tiếp.
 - 9router chạy ở cổng 20128. Model dùng: **GPT-6 Astra (Codex qua 9router — hạn mức ChatGPT)**, không tốn tiền fal. Các model fal tính tiền, chỉ dùng khi PM đồng ý.
 - Trình duyệt Playwright **hiện cửa sổ** (Chrome thật, profile riêng), trang cỡ **1600×900**. Không đổi cỡ cửa sổ hay zoom trang giữa chừng.
 - Ảnh gốc: `D:\projects\360-image-studio\assets\hdr\<tên>_hdr.jpg` (10000×5000). 360 View và Flat View hiện **thẳng ảnh gốc** (không qua bản thu nhỏ); layer crop cắt từ ảnh gốc và ghép ngược về ảnh gốc ở độ phân giải gốc.
@@ -23,7 +24,7 @@ Cách làm: điều khiển trực tiếp app bằng công cụ Playwright MCP (
 ### Bước 2 — Lập bản đồ khung cửa trên Flat View
 Flat View chính là bản đồ: ảnh gốc trải phẳng, có lưới yaw/pitch (đường mỗi 10°, đậm và có nhãn số mỗi 30°).
 1. Bấm tab **`Khung cửa`** ở bảng phải (`.panel-tabs button:has-text("Khung cửa")`), rồi nút **`Flat View`** ở thanh trên (`button:has-text("Flat View")`).
-2. **Chụp màn hình một lần** (`browser_take_screenshot`) và tìm mọi cửa: cửa sổ, cửa kính trượt, cửa ra vào. Gương phản chiếu cửa không phải cửa. Đọc yaw/pitch của mỗi cửa theo lưới (sai số 1–2° là được). Chỗ nhỏ khó thấy thì cuộn chuột phóng Flat View (lưới phóng theo), xong cuộn về như cũ.
+2. **Chụp màn hình một lần** (`browser_take_screenshot`) và tìm mọi cửa: cửa sổ, cửa kính trượt, cửa ra vào, và cả cửa phản chiếu trong các tấm gương lớn. Đọc yaw/pitch của mỗi cửa theo lưới (sai số 1–2° là được). Bản đồ phẳng quá nhỏ để thấy cửa trong gương, nên **soi thêm từng đoạn ngang của ảnh gốc** ở tab phụ (`browser_tabs` `new`): `http://localhost:3001/api/image/tile?path=<đường dẫn ảnh gốc mã hóa>&x=<0,2000,4000,6000,8000>&y=1900&w=2000&h=900` (dải pitch +20°…−12° chứa gần hết cửa), chụp từng đoạn rồi đổi toạ độ: `yaw = x/10000×360 − 180`, `pitch = 90 − y/5000×180`. Cửa khe hẹp sau cột cũng tính là cửa. Chỗ nhỏ khó thấy ở Flat View thì cuộn chuột phóng (lưới phóng theo), xong cuộn về như cũ.
 3. **Gõ các khung** vào ô `textarea[aria-label^="Khung cửa"]`, mỗi dòng một khung, rồi bấm `Thêm` (`button:text-is("Thêm")`):
    ```text
    <Tên>: yaw <từ>..<đến>, pitch <từ>..<đến>
@@ -54,7 +55,7 @@ AI chạy **nền theo từng layer**: tối đa 4 layer cùng lúc, layer thứ
 2. `button.prompt-btn-generate` (prompt đã điền sẵn, đổi nếu cần, xem mục 3). Nút đổi thành `Generating…`.
 3. `button:has-text("Back to View")`: **không hỏi gì**, không đổi 360 View, không dừng việc AI đang chạy.
 
-Trên dòng layer (tab `Layers`) có chip trạng thái: `⏳ đang gen` (đang chạy), `⏳ đang chờ lượt` (xếp hàng), `n kết quả` (xong), `⚠ lỗi` (rê chuột để xem lý do; bấm `Generate` lại để chạy lại). Mở lại layer đang chạy thì thấy `Generating…` (chưa bấm được); mở layer đã xong thì thấy các thẻ kết quả. Chờ bằng `browser_wait_for` `time: 30`, rồi `browser_find` regex `\d+ kết quả|⚠ lỗi|⏳`.
+Trên dòng layer (tab `Layers`) có chip trạng thái: `⏳ đang gen` (đang chạy), `⏳ đang chờ lượt` (xếp hàng), `n kết quả` (xong), `⚠ lỗi` (rê chuột để xem lý do; bấm `Generate` lại để chạy lại). Mở lại layer đang chạy thì thấy `Generating…` (chưa bấm được); mở layer đã xong thì thấy các thẻ kết quả. Chờ bằng `browser_wait_for` `time: 30`, rồi `browser_find` regex `\d+ kết quả|⚠ lỗi|⏳`. Lượt gen có thể lỗi tạm (9router `503 … Failed to convert streaming response to JSON (reset after 25s)`, gặp 3/6 lượt trong một lần thử): mở layer đó (lý do hiện dưới thanh prompt), bấm `Generate` lại rồi `Back`; lượt lỗi không chặn hàng đợi.
 
 Thử thật trên Greens 2 (5 layer): gửi xong 5 layer sau ~1 phút (mỗi lần bấm Generate mất 5–6 s để dựng tile), **đủ 5 kết quả sau ~3 phút** kể từ lần Generate đầu; mỗi layer chạy 100–140 s khi 4 layer chạy cùng lúc. Làm lần lượt từng layer (gen xong mới sang layer sau) sẽ mất gấp hơn đôi.
 
