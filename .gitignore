@@ -13,3 +13,6 @@ release/*.tar
 release/*.tar.gz
 release/*.zip
 .cache/
+
+assets/output/
+assets/hdr/

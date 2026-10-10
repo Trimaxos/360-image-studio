@@ -1,21 +1,17 @@
+import path from 'path';
 import dotenv from 'dotenv';
 dotenv.config();
 
-function unquoteEnv(value: string) {
-  const first = value[0];
-  return value.length >= 2 && (first === "'" || first === '"') && value.at(-1) === first
-    ? value.slice(1, -1)
-    : value;
-}
-
 export const config = {
   port: parseInt(process.env.PORT || '3001', 10),
-  authUsername: process.env.AUTH_USERNAME || 'admin',
-  authPasswordHash: unquoteEnv(process.env.AUTH_PASSWORD_HASH
-    || 'scrypt$3ed216f2c20a4a460216a7b4d26c72e8$fb37179cb06c35b9e09158132d1d78b0cdedb629c359ab6e18ff072477b4d98e5b3ee3887e557d202aeeba38d13506cd5385507844fa4b03312ecd44a04a9a06'),
+  // Where /api/project/save-to-folder writes projects (the browser automation has no file dialog)
+  projectsDir: path.resolve(process.env.PROJECTS_DIR || 'assets/output/projects'),
   // Cloud AI (fal.ai)
   falAiKey: process.env.FAL_AI_KEY || '',
   falAiModel: process.env.AI_MODEL || 'fal-ai/flux-2/klein/9b/edit',
+  // 9router (local OpenAI-compatible gateway) — Codex image edit via ChatGPT account
+  ninerouterBaseUrl: process.env.NINEROUTER_BASE_URL || 'http://localhost:20128/v1',
+  ninerouterKey: process.env.NINEROUTER_API_KEY || '',
   // Translate
   deepseekKey: process.env.DEEPSEEK_API_KEY || '',
   opencodeKey: process.env.OPENCODE_API_KEY || '',

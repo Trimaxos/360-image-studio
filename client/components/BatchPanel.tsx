@@ -1,18 +1,22 @@
 import { useRef, useState } from 'react';
 import { api } from '../lib/api';
-import { exportBatchToDirectory, pickBatchDirectory } from '../lib/batch-files';
+import { canPickProjectFiles, exportBatchToDirectory, pickBatchDirectory, pickProjectFiles } from '../lib/batch-files';
+import type { ProjectEntry } from '../lib/batch-project';
 import { useBatchStore, type BatchItem } from '../stores/batch';
 
 interface Props {
   busy: boolean;
   canSave: boolean;
   onSave(): void;
-  onAdd(files: File[]): void;
+  onSaveAs(): void;
+  onAdd(entries: ProjectEntry[]): void;
   onEdit(item: BatchItem): void;
   onBeforeExport(action: () => Promise<void>): void;
+  /** Something went wrong outside the export dialog (it shows its own errors): the app shows it in its error banner. */
+  onError(message: string): void;
 }
 
-export default function BatchPanel({ busy, canSave, onSave, onAdd, onEdit, onBeforeExport }: Props) {
+export default function BatchPanel({ busy, canSave, onSave, onSaveAs, onAdd, onEdit, onBeforeExport, onError }: Props) {
   const batch = useBatchStore();
   const input = useRef<HTMLInputElement>(null);
   const [exportOpen, setExportOpen] = useState(false);
@@ -51,6 +55,14 @@ export default function BatchPanel({ busy, canSave, onSave, onAdd, onEdit, onBef
     }
   };
 
+  // Open with handles when the browser can, so "Lưu" writes back to the same files; otherwise the plain file input.
+  const addProjects = () => {
+    if (!canPickProjectFiles()) { input.current?.click(); return; }
+    void pickProjectFiles(true).then((picked) => { if (picked?.length) onAdd(picked); }).catch((reason) => {
+      if (reason?.name !== 'AbortError') onError(`Không mở được project: ${reason instanceof Error ? reason.message : 'lỗi không rõ'}`);
+    });
+  };
+
   const chooseExportDirectory = () => {
     void Promise.resolve().then(() => pickBatchDirectory()).then(setExportDirectory).catch((reason) => {
       if (reason?.name !== 'AbortError') setError(reason instanceof Error ? reason.message : 'Không chọn được thư mục.');
@@ -59,8 +71,9 @@ export default function BatchPanel({ busy, canSave, onSave, onAdd, onEdit, onBef
 
   return <>
     <div className="batch-actions">
-      <button disabled={busy || !canSave || exporting} title={canSave ? 'Lưu project vào thư mục batch' : 'Apply và quay lại màn hình xem trước khi lưu batch'} onClick={onSave}>Lưu vào batch</button>
-      <button disabled={busy || exporting} onClick={() => input.current?.click()}>Thêm project cũ</button>
+      <button disabled={busy || !canSave || exporting} title={canSave ? 'Ghi đè vào file của project (project mới thì hỏi nơi lưu)' : 'Apply và quay lại màn hình xem trước khi lưu'} onClick={onSave}>💾 Lưu</button>
+      <button disabled={busy || !canSave || exporting} title={canSave ? 'Lưu thành file mới' : 'Apply và quay lại màn hình xem trước khi lưu'} onClick={onSaveAs}>Lưu thành…</button>
+      <button disabled={busy || exporting} onClick={addProjects}>Thêm project cũ</button>
       <button disabled={busy || exporting || !batch.items.length} onClick={() => {
         setError(''); setResults([]); setProgress(''); setExportOpen(true);
       }}>Xuất batch…</button>
@@ -70,7 +83,7 @@ export default function BatchPanel({ busy, canSave, onSave, onAdd, onEdit, onBef
       event.target.value = '';
       if (files.length) onAdd(files);
     }} />
-    <p className="batch-hint">Danh sách mất khi đóng app; project đã lưu vẫn còn trên ổ đĩa.</p>
+    <p className="batch-hint">Lưu ghi đè đúng file đã mở; Lưu thành… để tạo file mới. Danh sách mất khi đóng app, file vẫn còn trên ổ đĩa.</p>
     {batch.directory && <p className="batch-dest" title={batch.directory.name}>📁 {batch.directory.name}</p>}
     <div className="batch-items">
       {!batch.items.length && <p className="batch-empty">Chưa có project. Hãy lưu ảnh đang làm hoặc thêm project cũ.</p>}

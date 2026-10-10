@@ -5,6 +5,17 @@ import { useProjectStore } from '../stores/project';
 import { useBatchStore, type BatchItem } from '../stores/batch';
 import { api } from './api';
 import { addBatchProjects, restoreBatchItem, saveCurrentToBatch, snapshotProject } from './batch-project';
+import type { SaveDeps } from './project-save';
+
+/** Browser stand-ins: the save picker hands back `handle`; a project opened with a handle may be written to. */
+const saveDeps = (handle: FileSystemFileHandle): SaveDeps => ({
+  supportsFileSystemAccess: () => true,
+  pickSaveFile: async () => handle,
+  pickDirectory: async () => { throw new Error('unexpected directory picker'); },
+  ensureWritable: async () => true,
+  confirm: () => true,
+  download: () => { throw new Error('unexpected download'); },
+});
 
 const layer = (): Layer => ({
   id: 'layer', order: 1, type: 'flat', visible: true,
@@ -50,7 +61,7 @@ function mockDirectory(failure?: 'write' | 'close') {
 beforeEach(() => {
   useProjectStore.getState().reset();
   useProjectStore.setState({ selectedModel: null });
-  useBatchStore.setState({ items: [], directory: null, activeId: null, originalName: '' });
+  useBatchStore.setState({ items: [], directory: null, activeId: null, originalName: '', currentFile: null });
 });
 
 function openCurrent() {
@@ -73,10 +84,9 @@ test('snapshot includes project data and original filename without sharing neste
   assert.equal(snapshotProject().originalName, 'fallback.jpg');
 });
 
-test('save writes a snapshot, retains its handle, and marks saved only after close', async (t) => {
+test('saving a new project asks where (save as), writes a snapshot, retains its handle, and marks saved only after close', async (t) => {
   openCurrent();
   const fs = mockDirectory();
-  useBatchStore.getState().setDirectory(fs.directory);
   const blob = new Blob(['zip']);
   t.mock.method(api.project, 'download', async (snapshot: ProjectFile) => {
     assert.deepEqual(snapshot, project());
@@ -85,7 +95,7 @@ test('save writes a snapshot, retains its handle, and marks saved only after clo
     assert.equal(useBatchStore.getState().items.length, 0);
     return blob;
   });
-  await saveCurrentToBatch();
+  await saveCurrentToBatch('save', saveDeps(fs.handle));
   const batch = useBatchStore.getState();
   assert.equal(batch.items.length, 1);
   assert.equal(batch.activeId, batch.items[0].id);
@@ -105,10 +115,11 @@ test('saving active item updates the same ID and handle without allocating anoth
   openCurrent();
   const fs = mockDirectory();
   const original = { ...item(), fileHandle: fs.handle };
-  useBatchStore.setState({ directory: fs.directory, items: [original], activeId: original.id });
+  useBatchStore.setState({ directory: fs.directory, items: [original], activeId: original.id,
+    currentFile: { handle: fs.handle, name: original.projectName } });
   useProjectStore.getState().updateLayer('layer', { prompt: 'updated' });
   t.mock.method(api.project, 'download', async () => new Blob(['updated zip']));
-  await saveCurrentToBatch();
+  await saveCurrentToBatch('save', saveDeps(mockDirectory().handle));
   assert.equal(useBatchStore.getState().items.length, 1);
   const saved = useBatchStore.getState().items[0];
   assert.equal(saved.id, original.id);
@@ -123,13 +134,14 @@ for (const failure of ['download', 'write', 'close'] as const) {
     openCurrent();
     const fs = mockDirectory(failure === 'download' ? undefined : failure);
     const original = { ...item(), fileHandle: fs.handle };
-    useBatchStore.setState({ directory: fs.directory, items: [original], activeId: original.id });
+    useBatchStore.setState({ directory: fs.directory, items: [original], activeId: original.id,
+      currentFile: { handle: fs.handle, name: original.projectName } });
     useProjectStore.getState().updateLayer('layer', { prompt: 'unsaved' });
     t.mock.method(api.project, 'download', async () => {
       if (failure === 'download') throw new Error('network failed');
       return new Blob(['zip']);
     });
-    await assert.rejects(saveCurrentToBatch(), /failed|disk full/);
+    await assert.rejects(saveCurrentToBatch('save', saveDeps(fs.handle)), /failed|disk full/);
     assert.equal(useProjectStore.getState().hasUnsavedChanges, true);
     assert.equal(useBatchStore.getState().items[0], original);
     assert.equal(useBatchStore.getState().activeId, original.id);
@@ -140,13 +152,12 @@ for (const failure of ['download', 'write', 'close'] as const) {
 test('edits made while packaging do not mark the newer project saved', async (t) => {
   openCurrent();
   const fs = mockDirectory();
-  useBatchStore.getState().setDirectory(fs.directory);
   t.mock.method(api.project, 'download', async (snapshot: ProjectFile) => {
     useProjectStore.getState().updateLayer('layer', { prompt: 'edited during save' });
     assert.equal(snapshot.layers[0].prompt, 'original prompt');
     return new Blob(['old snapshot']);
   });
-  await saveCurrentToBatch();
+  await saveCurrentToBatch('save', saveDeps(fs.handle));
   assert.equal(useProjectStore.getState().hasUnsavedChanges, true);
   assert.equal(useProjectStore.getState().layers[0].prompt, 'edited during save');
   assert.equal(useBatchStore.getState().items[0].project.layers[0].prompt, 'original prompt');
@@ -189,6 +200,8 @@ test('imports continue after upload and image-open errors without replacing the 
   assert.equal(batch.items[0].width, 1200);
   assert.equal(batch.items[0].height, 600);
   assert.equal(batch.items[0].fileHandle, undefined);
+  assert.deepEqual(batch.items[0].sourceFile, { name: 'Good.360project', size: 3, lastModified: files[2].lastModified },
+    'the file it came from is remembered so Save can find and overwrite it');
   assert.equal(batch.activeId, null);
   assert.equal(useProjectStore.getState(), current);
   uploaded.layers[0].prompt = 'mutated response';

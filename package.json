@@ -7,7 +7,7 @@
     "doc": "docs"
   },
   "scripts": {
-    "test": "tsx --test client/**/*.test.ts server/*.test.ts server/**/*.test.ts && node client/views/Viewer360.regression.test.mjs",
+    "test": "tsx --test client/**/*.test.ts server/*.test.ts server/**/*.test.ts shared/*.test.ts && node client/views/Viewer360.regression.test.mjs",
     "dev": "vite",
     "build": "vite build",
     "server": "tsx server/index.ts",

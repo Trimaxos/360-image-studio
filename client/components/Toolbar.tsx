@@ -78,7 +78,7 @@ export default function Toolbar({ onExport, onSave, isSaving }: Props) {
 
       <section className="sidebar-section project-section">
         <div className="sidebar-section-title">Project</div>
-        <button className="sidebar-btn" disabled={!state.imagePath || isSaving} onClick={onSave} aria-busy={isSaving}>
+        <button className="sidebar-btn" disabled={!state.imagePath || state.workflow !== 'viewing' || isSaving} title={state.workflow === 'viewing' ? 'Ghi đè file project đang mở' : 'Apply và quay lại màn hình xem trước khi lưu'} onClick={onSave} aria-busy={isSaving}>
           <span className="sidebar-btn-icon">{isSaving ? <span className="inline-spinner" /> : '💾'}</span>
           <span>{isSaving ? 'Preparing Project…' : 'Save Project'}</span>
         </button>

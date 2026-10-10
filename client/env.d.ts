@@ -8,7 +8,19 @@ declare module '*.css' {
 // File System Access API — Chrome/Edge only (Firefox/Safari fall back to download)
 interface SaveFilePickerOptions {
   suggestedName?: string;
+  id?: string;
   types?: { description?: string; accept: Record<string, string[]> }[];
+}
+
+interface OpenFilePickerOptions {
+  multiple?: boolean;
+  id?: string;
+  types?: SaveFilePickerOptions['types'];
+  excludeAcceptAllOption?: boolean;
+}
+
+interface FileSystemHandlePermissionDescriptor {
+  mode?: 'read' | 'readwrite';
 }
 
 interface FileSystemWritableFileStream {
@@ -22,6 +34,8 @@ interface FileSystemFileHandle {
   createWritable(): Promise<FileSystemWritableFileStream>;
   getFile(): Promise<File>;
   isSameEntry(other: FileSystemHandle): Promise<boolean>;
+  queryPermission?(descriptor?: FileSystemHandlePermissionDescriptor): Promise<PermissionState>;
+  requestPermission?(descriptor?: FileSystemHandlePermissionDescriptor): Promise<PermissionState>;
 }
 
 interface DirectoryPickerOptions {
@@ -38,4 +52,5 @@ interface FileSystemDirectoryHandle {
 interface Window {
   showDirectoryPicker?(options?: DirectoryPickerOptions): Promise<FileSystemDirectoryHandle>;
   showSaveFilePicker?(options?: SaveFilePickerOptions): Promise<FileSystemFileHandle>;
+  showOpenFilePicker?(options?: OpenFilePickerOptions): Promise<FileSystemFileHandle[]>;
 }

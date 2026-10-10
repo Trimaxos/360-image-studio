@@ -1,107 +1,105 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { Layer } from '../../shared/types';
 import { api } from '../lib/api';
 import { useProjectStore } from '../stores/project';
-import { composeVariantPreview } from '../lib/visibility-mask';
 import RectSelectionOverlay from '../components/RectSelectionOverlay';
+import { MarkDrawOverlay, MarksSvgLayer } from '../components/MarksOverlay';
 
-interface FlatOverlay {
-  id: string;
-  src: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  visible: boolean;
-}
+const OVERLAY_MAX_WIDTH = 4096;
+const appliedVariantOf = (layer: Layer) => layer.variants?.find((variant) => variant.applied);
+/** A layer whose applied result is part of the changes (the server leaves the others out too). */
+const hasAppliedResult = (layer: Layer) => layer.status === 'committed' && !!appliedVariantOf(layer);
+/** What a layer's pixels in the overlay depend on: not its prompt, its name or the results it is not showing. */
+const pictureKey = (layer: Layer) => {
+  const applied = appliedVariantOf(layer)!;
+  return [layer.id, layer.order, layer.tileCoords, applied.id, applied.resultImageId, applied.equirectImageId ?? layer.equirectImageId,
+    applied.needsFit ?? false, applied.visibilityMask?.base64Mask ?? ''];
+};
 
 export default function FlatView() {
   const containerRef = useRef<HTMLDivElement>(null);
   const imagePath = useProjectStore((state) => state.imagePath);
   const imageWidth = useProjectStore((state) => state.imageWidth);
   const imageHeight = useProjectStore((state) => state.imageHeight);
-  const layers = useProjectStore((state) => state.layers);
   const workflow = useProjectStore((state) => state.workflow);
   const enterRectSelect = useProjectStore((state) => state.enterRectSelect);
+  const marks = useProjectStore((state) => state.marks);
+  const marksUi = useProjectStore((state) => state.marksUi);
+  const layers = useProjectStore((state) => state.layers);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [maskedSources, setMaskedSources] = useState<Record<string, string>>({});
   const dragging = useRef<{ x: number; y: number } | null>(null);
+  // The toggle belongs to the image it was turned on for: another image starts with it off.
+  const [changesFor, setChangesFor] = useState<string | null>(null);
+  const changesOn = changesFor !== null && changesFor === imagePath;
+  const [overlayId, setOverlayId] = useState<string | null>(null);
+  const [changesBusy, setChangesBusy] = useState(false);
+  const [changesError, setChangesError] = useState('');
 
-  const committedLayers = layers
-    .filter((layer) => layer.status === 'committed')
-    .sort((a, b) => a.order - b.order);
-  const overlayKey = committedLayers.map((layer) => {
-    const applied = (layer.variants ?? []).find((variant) => variant.applied);
-    return `${layer.id}:${applied?.resultImageId ?? ''}:${applied?.visibilityMask?.base64Mask ? 'masked' : ''}`;
-  }).join('|');
-
-  // Visibility masks are baked on a tile-sized canvas once per variant, so
-  // hiding/showing layers never triggers a full server-side re-composite.
-  useEffect(() => {
-    let disposed = false;
-    const jobs = committedLayers.flatMap((layer) => {
-      const applied = (layer.variants ?? []).find((variant) => variant.applied);
-      const mask = applied?.visibilityMask?.base64Mask;
-      if (!applied || !mask || !imagePath) return [];
-      const tileUrl = api.image.tileUrl(
-        imagePath, layer.tileCoords.x, layer.tileCoords.y, layer.tileCoords.w, layer.tileCoords.h,
-      );
-      return [composeVariantPreview(tileUrl, api.image.cacheUrl(applied.resultImageId), mask)
-        .then((source) => [layer.id, source] as const)];
-    });
-    if (!jobs.length) return;
-    void Promise.all(jobs)
-      .then((entries) => { if (!disposed) setMaskedSources(Object.fromEntries(entries)); })
-      .catch(() => { if (!disposed) setMaskedSources({}); });
-    return () => { disposed = true; };
-  }, [overlayKey, imagePath]);
+  // The Flat View is a clean map (original, grid, boxes): layers are looked at in the 360 view, or all at once
+  // through "Xem thay đổi", one merged picture the server builds.
+  const appliedLayers = useMemo(() => layers.filter(hasAppliedResult), [layers]);
+  const shownLayers = useMemo(() => appliedLayers.filter((layer) => layer.visible !== false), [appliedLayers]);
+  const changesKey = useMemo(() => JSON.stringify(shownLayers.map(pictureKey)), [shownLayers]);
 
   useEffect(() => {
     setZoom(1);
     setPan({ x: 0, y: 0 });
   }, [imagePath]);
 
-  // The selection overlay maps pointer positions against the contain-fit
-  // image, so any zoom/pan left over from viewing would shift the crop.
+  // Ask again whenever what the picture is made of changes; an answer that is no longer wanted (a newer request,
+  // the toggle turned off) is dropped.
   useEffect(() => {
-    if (workflow !== 'viewing') {
+    if (!changesOn || !imagePath || shownLayers.length === 0) {
+      setChangesBusy(false);
+      if (shownLayers.length === 0) setOverlayId(null);
+      return;
+    }
+    let wanted = true;
+    setChangesBusy(true);
+    setChangesError('');
+    api.image.changesOverlay({ imagePath, layers: shownLayers, maxWidth: OVERLAY_MAX_WIDTH })
+      .then((overlay) => {
+        if (!wanted) return;
+        setOverlayId(overlay.overlayId);
+        setChangesBusy(false);
+      })
+      .catch((error) => {
+        if (!wanted) return;
+        setOverlayId(null);
+        setChangesError(error instanceof Error ? error.message : String(error));
+        setChangesBusy(false);
+      });
+    return () => { wanted = false; };
+  }, [changesOn, imagePath, changesKey]);
+
+  const toggleChanges = () => {
+    setChangesFor(changesOn ? null : imagePath);
+    setOverlayId(null);
+    setChangesError('');
+  };
+
+  // The selection overlay (and the mark-drawing overlay) maps pointer positions
+  // against the contain-fit image, so any zoom/pan left over from viewing would
+  // shift the crop.
+  useEffect(() => {
+    if (workflow !== 'viewing' || marksUi.draw) {
       setZoom(1);
       setPan({ x: 0, y: 0 });
     }
-  }, [workflow]);
-
-  // Layers render as stacked SVG images in source-pixel coordinates — the
-  // same approach the 360 viewer uses with PSV meshes, so visibility toggles
-  // are pure CSS and need no server round-trip.
-  const overlays = committedLayers.flatMap((layer): FlatOverlay[] => {
-    const applied = (layer.variants ?? []).find((variant) => variant.applied);
-    if (!applied || applied.needsFit) return [];
-    const source = applied.visibilityMask?.base64Mask
-      ? maskedSources[layer.id]
-      : api.image.cacheUrl(applied.resultImageId);
-    if (!source) return [];
-    return [{
-      id: layer.id,
-      src: source,
-      x: layer.tileCoords.x,
-      y: layer.tileCoords.y,
-      width: applied.width,
-      height: applied.height,
-      visible: layer.visible !== false,
-    }];
-  });
+  }, [workflow, marksUi.draw]);
 
   return (
     <div
       ref={containerRef}
       className="flat-view-container"
       onWheel={(event) => {
-        if (workflow !== 'viewing') return;
+        if (workflow !== 'viewing' || marksUi.draw) return;
         event.preventDefault();
         setZoom((value) => Math.max(0.25, Math.min(6, value - event.deltaY * 0.001)));
       }}
       onPointerDown={(event) => {
-        if (workflow !== 'viewing' || event.button !== 1) return;
+        if (workflow !== 'viewing' || marksUi.draw || event.button !== 1) return;
         dragging.current = { x: event.clientX - pan.x, y: event.clientY - pan.y };
       }}
       onPointerMove={(event) => {
@@ -126,24 +124,42 @@ export default function FlatView() {
             height={imageHeight}
             preserveAspectRatio="none"
           />
-          {overlays.map((overlay) => (
+          {workflow === 'viewing' && changesOn && overlayId && (
             <image
-              key={overlay.id}
-              className="flat-layer"
-              data-layer-id={overlay.id}
-              href={overlay.src}
-              x={overlay.x}
-              y={overlay.y}
-              width={overlay.width}
-              height={overlay.height}
+              className="flat-changes"
+              href={api.image.cacheUrl(overlayId)}
+              x={0}
+              y={0}
+              width={imageWidth}
+              height={imageHeight}
               preserveAspectRatio="none"
-              style={overlay.visible ? undefined : { display: 'none' }}
+              pointerEvents="none"
             />
-          ))}
+          )}
+          {marksUi.open && (
+            <MarksSvgLayer width={imageWidth} height={imageHeight} marks={marks} grid={marksUi.grid} />
+          )}
         </svg>
       )}
-      {workflow === 'viewing' && (
+      {workflow === 'viewing' && appliedLayers.length > 0 && (
+        <div className="flat-changes-bar">
+          <button
+            className={`flat-changes-btn ${changesOn ? 'active' : ''}`}
+            aria-pressed={changesOn}
+            aria-busy={changesBusy}
+            title="Xem mọi thay đổi đã áp dụng, gộp thành một lớp trong suốt trên ảnh gốc"
+            onClick={toggleChanges}
+          >
+            {changesBusy ? '⏳ Đang dựng…' : '👁 Xem thay đổi'}
+          </button>
+          {changesOn && changesError && <span className="flat-changes-error" role="alert">{changesError}</span>}
+        </div>
+      )}
+      {workflow === 'viewing' && !marksUi.draw && (
         <button className="edit-here-btn" onClick={() => enterRectSelect('flat')}>🔒 Edit Here</button>
+      )}
+      {workflow === 'viewing' && marksUi.open && marksUi.draw && (
+        <MarkDrawOverlay imageWidth={imageWidth} imageHeight={imageHeight} />
       )}
       {workflow === 'rect-select' && <RectSelectionOverlay sourceView="flat" />}
     </div>

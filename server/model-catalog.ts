@@ -221,6 +221,24 @@ async function falOptions(): Promise<AiModelOption[]> {
   return result;
 }
 
+// ===== 9router (Codex via ChatGPT account) =====
+
+// Only cx/gpt-6-astra returns an image through the Responses image_generation
+// tool; the other cx/* models answer "no image-editing tool is available".
+export function ninerouterOptions(): AiModelOption[] {
+  if (!config.ninerouterKey) return [];
+  return [{
+    id: 'cx/gpt-6-astra',
+    displayName: 'GPT-6 Astra (Codex qua 9router — hạn mức ChatGPT)',
+    provider: 'ninerouter',
+    capabilities: ['image-edit'],
+    enabled: true,
+    hasMask: false,
+    maskRequired: false,
+    supportsReferenceImages: false,
+  }];
+}
+
 // ===== Public API =====
 
 export async function getModelInfo(modelId: string): Promise<AiModelOption | undefined> {
@@ -240,10 +258,8 @@ export async function getModelCatalog(): Promise<ModelCatalogResponse> {
   } catch (error) {
     errors.fal = error instanceof Error ? error.message : 'Không tải được fal.ai catalog';
   }
-  return {
-    groups: [
-      { provider: 'fal', label: 'fal.ai', models: fal },
-    ],
-    errors,
-  };
+  const groups: ModelCatalogResponse['groups'] = [{ provider: 'fal', label: 'fal.ai', models: fal }];
+  const ninerouter = ninerouterOptions();
+  if (ninerouter.length) groups.push({ provider: 'ninerouter', label: '9router', models: ninerouter });
+  return { groups, errors };
 }

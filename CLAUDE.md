@@ -23,6 +23,7 @@ Mục tiêu: xem ảnh, chọn vùng, chỉnh AI, cân đường chân trời, x
 - **Simplicity First** — Code tối thiểu. Không abstraction cho single-use.
 - **Surgical Changes** — Chỉ chạm thứ cần. Theo style có sẵn.
 - **Goal-Driven** — Xác định success criteria. Loop đến khi verify.
+- **Agent (bắt buộc):** Không dùng agent chạy ngầm dạng Workflow. Cần agent thì chạy subagent hiển thị (Agent tool, chạy foreground — `run_in_background: false`) để user xem được.
 
 ## Architecture (from Plan.md)
 

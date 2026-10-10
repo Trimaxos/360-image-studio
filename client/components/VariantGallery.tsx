@@ -17,13 +17,14 @@ export default function VariantGallery() {
     setPendingFitVariant(null);
   }, [pendingFitVariant, activeLayerId, setPendingFitVariant]);
   const imagePath = useProjectStore((s) => s.imagePath);
-  const selectVariantForEditing = useProjectStore((s) => s.selectVariantForEditing);
-  const selectOriginalVariant = useProjectStore((s) => s.selectOriginalVariant);
+  const reviewVariantId = useProjectStore((s) => s.reviewVariantId);
+  const setReviewVariant = useProjectStore((s) => s.setReviewVariant);
   const removeVariantFromLayer = useProjectStore((s) => s.removeVariantFromLayer);
 
   const activeLayer = layers.find((l) => l.id === activeLayerId);
   const variants = activeLayer?.variants ?? [];
-  const appliedVariant = variants.find((variant) => variant.applied);
+  // Two different things: the result being looked at in this editor, and the result applied to the 360 view.
+  const reviewing = variants.find((variant) => variant.id === reviewVariantId);
   const originalUrl = activeLayer?.resultImageId
     ? api.image.cacheUrl(activeLayer.resultImageId)
     : imagePath && activeLayer
@@ -36,13 +37,7 @@ export default function VariantGallery() {
       )
       : '';
 
-  const handleSelect = useCallback(
-    (variantId: string) => {
-      if (!activeLayerId) return;
-      selectVariantForEditing(activeLayerId, variantId);
-    },
-    [activeLayerId, selectVariantForEditing],
-  );
+  const handleSelect = useCallback((variantId: string) => setReviewVariant(variantId), [setReviewVariant]);
 
   const handleDelete = useCallback(
     (variantId: string) => {
@@ -62,9 +57,9 @@ export default function VariantGallery() {
         Results ({variants.length + 1})
       </div>
       <div className="variant-gallery-list">
-        <div className={`variant-card original ${!appliedVariant ? 'applied' : ''}`}>
-          <div className="variant-thumb-wrapper" onClick={() => selectOriginalVariant(activeLayerId)}>
-            {!appliedVariant && <span className="variant-badge">✓ ĐANG XEM</span>}
+        <div className={`variant-card original ${!reviewing ? 'applied' : ''}`}>
+          <div className="variant-thumb-wrapper" onClick={() => setReviewVariant(null)}>
+            {!reviewing && <div className="variant-badges"><span className="variant-badge">✓ ĐANG XEM</span></div>}
             <img className="variant-thumb" src={originalUrl} alt="Original" />
           </div>
           <div className="variant-meta">
@@ -75,15 +70,20 @@ export default function VariantGallery() {
           </div>
         </div>
         {variants.map((variant) => {
-          const isApplied = variant.applied;
+          const isReviewing = variant.id === reviewVariantId;
           const cacheUrl = api.image.cacheUrl(variant.resultImageId);
           return (
             <div
               key={variant.id}
-              className={`variant-card ${isApplied ? 'applied' : ''}`}
+              className={`variant-card ${isReviewing ? 'applied' : ''}`}
             >
               <div className="variant-thumb-wrapper" onClick={() => handleSelect(variant.id)}>
-                {isApplied && <span className="variant-badge">✓ ĐÃ CHỌN</span>}
+                {(isReviewing || variant.applied) && (
+                  <div className="variant-badges">
+                    {isReviewing && <span className="variant-badge">✓ ĐANG XEM</span>}
+                    {variant.applied && <span className="variant-badge variant-badge-360">🌐 Đang ở 360 View</span>}
+                  </div>
+                )}
                 <img
                   className="variant-thumb"
                   src={cacheUrl}

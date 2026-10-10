@@ -1,21 +1,25 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import BatchSaveConfirm from './components/BatchSaveConfirm';
+import ConfirmDialog from './components/ConfirmDialog';
 import RightSidebar, { type RightTab } from './components/RightSidebar';
 import { useBatchStore } from './stores/batch';
-import { addBatchProjects, restoreBatchItem, saveCurrentToBatch, snapshotProject } from './lib/batch-project';
+import { addBatchProjects, restoreBatchItem, saveCurrentToBatch } from './lib/batch-project';
+import { canPickProjectFiles, pickProjectFiles } from './lib/batch-files';
+import { browserSaveDeps, downloadProject, saveProject, saveProjectToFolder, type SaveMode } from './lib/project-save';
+import { isAutoMode } from './lib/auto-mode';
+import FileMenu, { saveShortcut } from './components/FileMenu';
 import CanvasEditor from './components/CanvasEditor';
 import ErrorBoundary from './components/ErrorBoundary';
 import ExportDialog from './components/ExportDialog';
 import ImageDropZone from './components/ImageDropZone';
 import PromptBar from './components/PromptBar';
 import Toolbar from './components/Toolbar';
-import { downloadBlob } from './lib/canvas-exchange';
 import { api } from './lib/api';
+import { hasGenerationInFlight } from './lib/generation';
 import { resolveImageMode } from './lib/image-mode';
 import { useProjectStore } from './stores/project';
 import FlatView from './views/FlatView';
 import Viewer360 from './views/Viewer360';
-import { useAuth } from './components/LoginGate';
 
 function formatFileSize(bytes?: number) {
   if (!bytes) return '';
@@ -24,7 +28,6 @@ function formatFileSize(bytes?: number) {
 }
 
 export default function App() {
-  const { logout } = useAuth();
   const state = useProjectStore();
   const [activeTab, setActiveTab] = useState<'360' | 'flat'>('360');
   const [exportOpen, setExportOpen] = useState(false);
@@ -38,15 +41,14 @@ export default function App() {
   const [pendingAction, setPendingAction] = useState<(() => Promise<void>) | null>(null);
   const [batchError, setBatchError] = useState('');
   const [rightTab, setRightTab] = useState<RightTab>('layers');
+  const [saveHint, setSaveHint] = useState('');
   const batch = useBatchStore();
   const imageInput = useRef<HTMLInputElement>(null);
   const projectInput = useRef<HTMLInputElement>(null);
-  const fileMenuRef = useRef<HTMLDetailsElement>(null);
   const fileName = state.imagePath ? (batch.originalName || state.imagePath.split('/').pop()?.split('\\').pop()) : undefined;
   const committed = state.layers.some((layer) => layer.status === 'committed');
-  const closeFileMenu = () => {
-    if (fileMenuRef.current) fileMenuRef.current.open = false;
-  };
+  /** Saving needs the viewing screen: canvas work that was not applied yet is not part of the project. */
+  const canSave = !!state.imagePath && state.workflow === 'viewing';
 
   useEffect(() => {
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -63,37 +65,77 @@ export default function App() {
     useProjectStore.getState().reset();
     useProjectStore.getState().openImage(meta.path, meta.width, meta.height);
     useBatchStore.getState().setCurrent(null, file.name);
+    useBatchStore.getState().setCurrentFile(null);
     setFileSize(file.size);
   }, []);
 
-  const saveProject = useCallback(async () => {
-    if (saveInFlight.current) return;
-    const current = useProjectStore.getState();
-    if (!current.imagePath) return;
+  // The real browser, with the "which folder?" hint shown only while that picker is open. Native confirm dialogs are not
+  // used for the save questions: automation (the review browser) dismisses them on its own, which would cancel the save.
+  const saveDeps = useMemo(() => browserSaveDeps({ folderPrompt: (message) => setSaveHint(message ?? '') }), []);
+
+  /** Save (write back to the project's file) or Save As (pick a new one). */
+  const runSave = useCallback(async (mode: SaveMode) => {
+    // Never overlap a save with opening another project or with another save.
+    if (saveInFlight.current || batchLock.current) return;
+    if (!useProjectStore.getState().imagePath) return;
     saveInFlight.current = true;
     setIsSavingProject(true);
-    const project = snapshotProject();
     try {
-      if (useBatchStore.getState().activeId) {
-        setRightTab('batch');
-        await saveCurrentToBatch();
-        return;
-      }
-      const zipBlob = await api.project.download(project);
-      const base = current.imagePath.split('/').pop()?.split('\\').pop()?.replace(/\.\w+$/, '') ?? 'project';
-      downloadBlob(zipBlob, `${base}.360project`);
-      const after = useProjectStore.getState();
-      if (after.imagePath === current.imagePath && after.layers === current.layers
-        && after.horizon === current.horizon && after.imageMode === current.imageMode) after.markProjectSaved();
+      await saveProject(mode, { deps: saveDeps });
     } catch (err: any) {
-      alert(`Save failed: ${err.message}`);
+      if (err?.name !== 'AbortError') setBatchError(`Không lưu được: ${err.message}`);
+    } finally {
+      saveInFlight.current = false;
+      setIsSavingProject(false);
+    }
+  }, [saveDeps]);
+
+  /** File → Download Project: always a browser download (the automation and browsers without file access use it). */
+  const downloadProjectFile = useCallback(async () => {
+    if (saveInFlight.current || batchLock.current) return;
+    if (!useProjectStore.getState().imagePath) return;
+    saveInFlight.current = true;
+    setIsSavingProject(true);
+    try {
+      await downloadProject({ deps: saveDeps });
+    } catch (err: any) {
+      alert(`Save failed: ${err.message}`);    } finally {
+      saveInFlight.current = false;
+      setIsSavingProject(false);
+    }
+  }, [saveDeps]);
+
+  /** File → Auto (?auto=1): the server saves into assets/output/projects without a dialog; the hint shows where it went. */
+  const autoSaveProject = useCallback(async () => {
+    if (saveInFlight.current || batchLock.current) return;
+    if (!useProjectStore.getState().imagePath) return;
+    saveInFlight.current = true;
+    setIsSavingProject(true);
+    try {
+      const saved = await saveProjectToFolder();
+      const hint = `Đã lưu: ${saved.path}`;
+      setSaveHint(hint);
+      setTimeout(() => setSaveHint((current) => (current === hint ? '' : current)), 8000);
+    } catch (err: any) {
+      setBatchError(`Không lưu được: ${err.message}`);
     } finally {
       saveInFlight.current = false;
       setIsSavingProject(false);
     }
   }, []);
 
-  const loadProject = useCallback(async (file: File) => {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const mode = saveShortcut(event);
+      if (!mode) return;
+      event.preventDefault();
+      if (useProjectStore.getState().imagePath) void runSave(mode);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [runSave]);
+
+  const loadProject = useCallback(async (file: File, handle?: FileSystemFileHandle) => {
     setIsLoadingProject(true);
     setLoadingProjectName(file.name);
     try {
@@ -108,6 +150,7 @@ export default function App() {
         horizon: project.horizon ?? { yaw: 0, pitch: 0, roll: 0 },
         hasUnsavedChanges: false,
       });
+      useBatchStore.getState().setCurrentFile({ handle, name: file.name, size: file.size, lastModified: file.lastModified });
       setFileSize(meta.sizeBytes);
     } catch (err: any) {
       alert(`Load failed: ${err.message}`);
@@ -118,7 +161,7 @@ export default function App() {
   }, []);
 
   const runBatchTask = async (action: () => Promise<void>) => {
-    if (batchLock.current) return;
+    if (batchLock.current || saveInFlight.current) return;
     batchLock.current = true;
     setBatchBusy(true);
     setBatchError('');
@@ -131,7 +174,8 @@ export default function App() {
   };
   const confirmCurrent = (action: () => Promise<void>) => {
     if (batchLock.current || saveInFlight.current || isLoadingProject) return;
-    if (useProjectStore.getState().workflow === 'generating') {
+    // A generation still queued or running belongs to this project: its result would have nowhere to land after the switch.
+    if (useProjectStore.getState().workflow === 'generating' || hasGenerationInFlight(useProjectStore.getState().generations)) {
       setBatchError('Hãy chờ AI xử lý xong trước khi chuyển project.');
       return;
     }
@@ -143,11 +187,21 @@ export default function App() {
     if (!action) return;
     void runBatchTask(async () => {
       if (save) {
-        await saveCurrentToBatch();
+        await saveCurrentToBatch('save', saveDeps);
         if (useProjectStore.getState().hasUnsavedChanges) throw new Error('Project đã thay đổi trong khi lưu. Hãy lưu lại trước khi chuyển.');
       }
       setPendingAction(null);
       await action();
+    });
+  };
+
+  /** File → Load Project: open with a handle when the browser can (Save then writes back), else the file input. */
+  const openProjectPicker = () => {
+    if (!canPickProjectFiles()) { projectInput.current?.click(); return; }
+    void pickProjectFiles(false).then((picked) => {
+      if (picked?.length) confirmCurrent(() => loadProject(picked[0].file, picked[0].handle));
+    }).catch((reason) => {
+      if (reason?.name !== 'AbortError') setBatchError(reason instanceof Error ? reason.message : 'Không mở được project.');
     });
   };
 
@@ -194,26 +248,22 @@ export default function App() {
             ⇄ Chế độ: {modeLabel}
           </button>
         </nav>
-        <details className="file-menu" ref={fileMenuRef}>
-          <summary>☰ File</summary>
-          <div className="file-menu-popover">
-            <button onClick={() => { closeFileMenu(); imageInput.current?.click(); }}>📂 Open Image</button>
-            <button disabled={isLoadingProject} onClick={() => { closeFileMenu(); projectInput.current?.click(); }}>📋 Load Project</button>
-            <button disabled={!state.imagePath || isSavingProject} onClick={() => { closeFileMenu(); void saveProject(); }}>
-              {isSavingProject ? <><span className="inline-spinner" /> Preparing Project…</> : <>💾 Download Project</>}
-            </button>
-            <button disabled={!state.imagePath || !committed} onClick={() => { closeFileMenu(); setExportOpen(true); }}>📤 Export Final</button>
-            <button disabled={!state.imagePath} onClick={() => { closeFileMenu(); confirmCurrent(async () => { state.reset(); batch.setCurrent(null, ''); }); }}>↻ New</button>
-          </div>
-        </details>
+        <FileMenu hasImage={!!state.imagePath} canSave={canSave} canExport={committed} isSaving={isSavingProject} isLoading={isLoadingProject}
+          onOpenImage={() => imageInput.current?.click()}
+          onLoadProject={openProjectPicker}
+          onSave={() => void runSave('save')}
+          onSaveAs={() => void runSave('saveAs')}
+          onAutoSave={isAutoMode() ? () => void autoSaveProject() : undefined}
+          onDownload={() => void downloadProjectFile()}
+          onExport={() => setExportOpen(true)}
+          onNew={() => confirmCurrent(async () => { state.reset(); batch.setCurrent(null, ''); batch.setCurrentFile(null); })} />
         {fileName && <span className="top-bar-file"><strong>{fileName}</strong> · {state.imageWidth} × {state.imageHeight} {fileSize ? `· ${formatFileSize(fileSize)}` : ''}</span>}
         <button className="export-final-btn" disabled={!state.imagePath || !committed} onClick={() => setExportOpen(true)}>Export Final</button>
-        <button className="logout-btn" onClick={() => confirmCurrent(async () => { await logout(); })}>Đăng xuất</button>
       </header>
 
       <ErrorBoundary>
         <main className="workspace">
-          <Toolbar onExport={() => setExportOpen(true)} onSave={() => void saveProject()} isSaving={isSavingProject} />
+          <Toolbar onExport={() => setExportOpen(true)} onSave={() => void runSave('save')} isSaving={isSavingProject} />
           <section className="editor-area">
             {state.workflow === 'empty'
               ? <ImageDropZone onOpenFile={openFile} />
@@ -223,24 +273,28 @@ export default function App() {
           </section>
           <RightSidebar tab={rightTab} onTab={setRightTab}
             busy={batchBusy || isSavingProject || isLoadingProject || state.workflow === 'generating'}
-            canSave={!!state.imagePath && state.workflow === 'viewing'}
-            onSave={() => { setRightTab('batch'); void runBatchTask(saveCurrentToBatch); }}
-            onAdd={(files) => void runBatchTask(async () => {
-              const errors = await addBatchProjects(files);
+            canSave={canSave}
+            onSave={() => { setRightTab('batch'); void runBatchTask(() => saveCurrentToBatch('save', saveDeps)); }}
+            onSaveAs={() => { setRightTab('batch'); void runBatchTask(() => saveCurrentToBatch('saveAs', saveDeps)); }}
+            onAdd={(entries) => void runBatchTask(async () => {
+              const errors = await addBatchProjects(entries);
               if (errors.length) setBatchError(errors.join('\n'));
             })}
             onEdit={(item) => confirmCurrent(async () => { restoreBatchItem(item); setFileSize(undefined); })}
             onBeforeExport={(action) => {
               if (batch.activeId && state.hasUnsavedChanges) confirmCurrent(action);
               else void runBatchTask(action);
-            }} />
+            }}
+            onError={setBatchError} />
         </main>
         <PromptBar />
       </ErrorBoundary>
       {batchError && <div className="batch-error" role="alert">{batchError}<button onClick={() => setBatchError('')}>Đóng</button></div>}
-      {pendingAction && <BatchSaveConfirm busy={batchBusy} canSave={state.workflow === 'viewing'}
+      {pendingAction && <BatchSaveConfirm busy={batchBusy || isSavingProject} canSave={canSave}
         onCancel={() => setPendingAction(null)} onContinue={resolvePending} />}
       {batchBusy && <div className="batch-working" role="status"><span className="inline-spinner" /> Đang xử lý batch…</div>}
+      {saveHint && <div className="save-hint" role="status">{saveHint}</div>}
+      <ConfirmDialog />
       <footer className="status-bar">
         <span>{fileName ? `${fileName} — ${state.layers.length} layer(s)` : 'Chưa mở ảnh'}</span>
         <span>{isFlatImage ? '🖼' : '🌐'} {modeLabel} · {state.workflow}</span>

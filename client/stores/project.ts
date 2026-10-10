@@ -9,6 +9,7 @@ import type {
   SelectionDraft,
   ViewPose,
 } from '../../shared/types';
+import type { CropMark, ParsedMark } from '../../shared/crop-plan';
 import type { WorkflowState } from './workflow';
 import { detectImageMode } from '../lib/image-mode';
 
@@ -45,6 +46,13 @@ interface EditSnapshot {
   selection: SelectionDraft | null;
 }
 
+/** An AI generation that belongs to a layer, not to the screen: it goes on when the editor is left. */
+export interface Generation {
+  status: 'queued' | 'running' | 'failed';
+  error?: string;
+  startedAt: number;
+}
+
 export interface ProjectState {
   imagePath: string | null;
   imageWidth: number;
@@ -69,7 +77,32 @@ export interface ProjectState {
   selectedModel: AiModelOption | null;
   previewImage: string | null;
   previewLayer: Partial<Layer> | null;
+  /** Window boxes marked on the Flat View; session-only, turned into draft layers by "Tạo layer crop". */
+  marks: CropMark[];
+  /** open = the "Khung cửa" panel is showing (Flat View then draws the grid and the boxes). */
+  marksUi: { open: boolean; grid: boolean; draw: boolean };
+  /** The "Tạo layer crop" run in progress. Kept here, not in the panel, so closing the tab neither loses it nor allows a second one. */
+  marksRun: { id: number; done: number; total: number } | null;
+  /** Crops of the last run that failed ("Tên: lỗi"); cleared when the next run starts or another image opens. */
+  marksFailures: string[];
+  /**
+   * The result the editor is looking at (null = the original tile). Looking is not applying: it only decides what the canvas
+   * shows and what the next Generate continues from, and never reaches the 360 view, the export or the project file.
+   */
+  reviewVariantId: string | null;
+  /** The layer whose result is being applied to the panorama (the server is reprojecting it). */
+  applyingLayerId: string | null;
+  /** AI generations by layer id: queued, running, or failed (a finished one leaves its result in the layer's variants). */
+  generations: Record<string, Generation>;
 
+  addMarks(marks: ParsedMark[]): void;
+  removeMark(id: string): void;
+  clearMarks(): void;
+  setMarksUi(patch: Partial<ProjectState['marksUi']>): void;
+  setMarksRun(run: ProjectState['marksRun']): void;
+  setMarksFailures(failures: string[]): void;
+  /** Adds an unedited crop layer without leaving the viewing screen (bulk crops). */
+  addDraftLayer(selection: SelectionDraft, resultImageId: string, width: number, height: number, name: string): void;
   openImage(path: string, width: number, height: number): void;
   updateViewPose(pose: Partial<ViewPose>): void;
   enterRectSelect(sourceView: '360' | 'flat'): void;
@@ -94,8 +127,9 @@ export interface ProjectState {
   clearVariants(): void;
   // Variant management (v4)
   addVariantToLayer(layerId: string, variant: LayerVariant): void;
-  selectVariantForEditing(layerId: string, variantId: string): void;
-  selectOriginalVariant(layerId: string): void;
+  setReviewVariant(variantId: string | null): void;
+  setApplyingLayer(layerId: string | null): void;
+  setGeneration(layerId: string, generation: Generation | null): void;
   updateVariantMask(layerId: string, variantId: string, mask: LayerVariant['visibilityMask']): void;
   updateVariantResult(layerId: string, variantId: string, result: {
     resultImageId: string; width: number; height: number;
@@ -104,7 +138,8 @@ export interface ProjectState {
   /** Variant vừa import lệch tỉ lệ, cần tự mở trình căn chỉnh (transform) */
   pendingFitVariant: { layerId: string; variantId: string } | null;
   setPendingFitVariant(value: { layerId: string; variantId: string } | null): void;
-  leaveCanvas(choice: 'save' | 'discard'): void;
+  /** keep = Back: hide the editor and keep everything (results, applied result, running generations). */
+  leaveCanvas(choice: 'save' | 'discard' | 'keep'): void;
   addLayer(layer: Layer): void;
   updateLayer(id: string, patch: Partial<Layer>): void;
   removeLayer(id: string): void;
@@ -115,6 +150,40 @@ export interface ProjectState {
 
 const defaultPose: ViewPose = { yaw: 0, pitch: 0, roll: 0, fov: 90 };
 const defaultHorizon: Horizon = { yaw: 0, pitch: 0, roll: 0 };
+
+/** What the editor looks at when a layer is opened: the result applied to the 360 view, else the newest result, else the original. */
+function defaultReviewVariantId(layer: Layer): string | null {
+  const variants = layer.variants ?? [];
+  return variants.find((variant) => variant.applied)?.id ?? newestVariantId(variants);
+}
+
+/** The most recent result (the later one when two share a timestamp), or null when there are none. */
+function newestVariantId(variants: LayerVariant[]): string | null {
+  let newest: LayerVariant | undefined;
+  for (const variant of variants) if (!newest || variant.createdAt >= newest.createdAt) newest = variant;
+  return newest?.id ?? null;
+}
+
+function newPerspectiveLayer(
+  order: number, selection: SelectionDraft, resultImageId: string, perspWidth: number, perspHeight: number,
+): Layer {
+  return {
+    id: crypto.randomUUID(),
+    order,
+    type: selection.sourceView === '360' ? 'perspective' : 'flat',
+    visible: true,
+    ...selection.viewPose,
+    tileCoords: selection.sourceView === 'flat'
+      ? { x: selection.tileCoords.x, y: selection.tileCoords.y, w: perspWidth, h: perspHeight }
+      : { x: 0, y: 0, w: perspWidth, h: perspHeight },
+    maskData: [],
+    prompt: selection.prompt,
+    resultImageId,
+    status: 'draft',
+    selection,
+    variants: [],
+  };
+}
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
   imagePath: null,
@@ -140,13 +209,42 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   selectedModel: null,
   previewImage: null,
   previewLayer: null,
+  marks: [],
+  marksUi: { open: false, grid: true, draw: false },
+  marksRun: null,
+  marksFailures: [],
+  reviewVariantId: null,
+  applyingLayerId: null,
+  generations: {},
 
+  setMarksRun: (marksRun) => set({ marksRun }),
+  setMarksFailures: (marksFailures) => set({ marksFailures }),
+  addMarks: (marks) => set((state) => ({
+    marks: [...state.marks, ...marks.map((mark) => ({ ...mark, id: crypto.randomUUID() }))],
+  })),
+  removeMark: (id) => set((state) => ({ marks: state.marks.filter((mark) => mark.id !== id) })),
+  clearMarks: () => set({ marks: [] }),
+  setMarksUi: (patch) => set((state) => ({ marksUi: { ...state.marksUi, ...patch } })),
+  addDraftLayer: (selection, resultImageId, perspWidth, perspHeight, name) => set((state) => ({
+    layers: [
+      ...state.layers,
+      { ...newPerspectiveLayer(state.layers.length + 1, selection, resultImageId, perspWidth, perspHeight), name },
+    ],
+    hasUnsavedChanges: true,
+  })),
   openImage: (imagePath, imageWidth, imageHeight) => set({
     imagePath,
     imageWidth,
     imageHeight,
     imageMode: detectImageMode(imageWidth, imageHeight),
     layers: [],
+    marks: [],
+    marksUi: { ...get().marksUi, draw: false },
+    marksRun: null,
+    marksFailures: [],
+    reviewVariantId: null,
+    applyingLayerId: null,
+    generations: {},
     workflow: 'viewing',
     viewPose: { ...defaultPose },
     horizon: { ...defaultHorizon },
@@ -167,31 +265,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     rectSelect: null,
   })),
   createPerspectiveLayer: (selection, resultImageId, perspWidth, perspHeight) => set((state) => {
-    const layerId = crypto.randomUUID();
-    const layer: Layer = {
-      id: layerId,
-      order: state.layers.length + 1,
-      type: selection.sourceView === '360' ? 'perspective' : 'flat',
-      visible: true,
-      ...selection.viewPose,
-      tileCoords: selection.sourceView === 'flat'
-        ? { x: selection.tileCoords.x, y: selection.tileCoords.y, w: perspWidth, h: perspHeight }
-        : { x: 0, y: 0, w: perspWidth, h: perspHeight },
-      maskData: [],
-      prompt: selection.prompt,
-      resultImageId,
-      status: 'draft',
-      selection,
-      variants: [],
-    };
+    const layer = newPerspectiveLayer(state.layers.length + 1, selection, resultImageId, perspWidth, perspHeight);
     return {
       layers: [...state.layers, layer],
-      activeLayerId: layerId,
+      activeLayerId: layer.id,
       workflow: 'canvas-edit',
       selectionDraft: selection,
       regionEdit: null,
       activeTool: null,
       editSnapshot: { layer: null, selection },
+      reviewVariantId: null,
       dirty: false,
       hasUnsavedChanges: true,
     };
@@ -207,6 +290,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       selectionDraft: layer.selection ?? null,
       regionEdit: null,
       editSnapshot: { layer: structuredClone(layer), selection: layer.selection ?? null },
+      reviewVariantId: defaultReviewVariantId(layer),
       dirty: false,
       generatedVariants: [],
       selectedVariantId: null,
@@ -242,50 +326,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     ),
     hasUnsavedChanges: true,
   })),
-  selectVariantForEditing: (layerId, variantId) => set((state) => ({
-    layers: state.layers.map((layer) => layer.id === layerId
-      ? {
-        ...layer,
-        // A layer-level panorama cache must always belong to the variant that
-        // is currently selected. Never keep the previously selected cache.
-        equirectImageId: (() => {
-          const variants = layer.variants ?? [];
-          const deselect = variants.some((variant) => variant.id === variantId && variant.applied);
-          return deselect
-            ? undefined
-            : variants.find((variant) => variant.id === variantId)?.equirectImageId;
-        })(),
-        variants: (() => {
-          const variants = layer.variants ?? [];
-          const deselect = variants.some((variant) => variant.id === variantId && variant.applied);
-          return variants.map((variant) => ({
-            ...variant,
-            applied: deselect ? false : variant.id === variantId,
-          }));
-        })(),
-      }
-      : layer),
-    selectedVariantId: null,
-    hasUnsavedChanges: true,
-  })),
-  selectOriginalVariant: (layerId) => set((state) => ({
-    layers: state.layers.map((layer) => layer.id === layerId
-      ? {
-        ...layer,
-        equirectImageId: undefined,
-        variants: (layer.variants ?? []).map((variant) => ({ ...variant, applied: false })),
-      }
-      : layer),
-    selectedVariantId: null,
-    hasUnsavedChanges: true,
-  })),
+  setReviewVariant: (reviewVariantId) => set({ reviewVariantId, selectedVariantId: null }),
+  setApplyingLayer: (applyingLayerId) => set({ applyingLayerId }),
+  setGeneration: (layerId, generation) => set((state) => {
+    const generations = { ...state.generations };
+    if (generation) generations[layerId] = generation;
+    else delete generations[layerId];
+    return { generations };
+  }),
+  // The mask and the fit are edits to a result. They never touch the panorama cache of the applied result: the 360 view
+  // keeps showing what was applied until the next Apply recomputes it.
   updateVariantMask: (layerId, variantId, mask) => set((state) => ({
     layers: state.layers.map((layer) => layer.id === layerId
       ? {
         ...layer,
-        equirectImageId: undefined,
         variants: (layer.variants ?? []).map((variant) => variant.id === variantId
-          ? { ...variant, visibilityMask: mask, equirectImageId: undefined }
+          ? { ...variant, visibilityMask: mask }
           : variant),
       }
       : layer),
@@ -295,7 +351,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     layers: state.layers.map((layer) => layer.id === layerId
       ? {
         ...layer,
-        equirectImageId: undefined,
         variants: (layer.variants ?? []).map((variant) => variant.id === variantId
           ? {
             ...variant,
@@ -304,7 +359,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             height: result.height,
             needsFit: false,
             visibilityMask: undefined,
-            equirectImageId: undefined,
           }
           : variant),
       }
@@ -313,14 +367,27 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   })),
   pendingFitVariant: null,
   setPendingFitVariant: (pendingFitVariant) => set({ pendingFitVariant }),
-  removeVariantFromLayer: (layerId, variantId) => set((state) => ({
-    layers: state.layers.map((layer) =>
+  removeVariantFromLayer: (layerId, variantId) => set((state) => {
+    const layers = state.layers.map((layer) =>
       layer.id === layerId
-        ? { ...layer, variants: (layer.variants ?? []).filter((v) => v.id !== variantId) }
+        ? {
+          ...layer,
+          variants: (layer.variants ?? []).filter((v) => v.id !== variantId),
+          // The picture on the 360 view belongs to the applied result: deleting that result takes the layer out of it.
+          equirectImageId: (layer.variants ?? []).some((v) => v.id === variantId && v.applied) ? undefined : layer.equirectImageId,
+        }
         : layer
-    ),
-    hasUnsavedChanges: true,
-  })),
+    );
+    // Deleting the result being looked at moves the editor to the newest one that is left (or the original).
+    const lookingAtIt = state.reviewVariantId === variantId;
+    return {
+      layers,
+      reviewVariantId: lookingAtIt
+        ? newestVariantId(layers.find((layer) => layer.id === layerId)?.variants ?? [])
+        : state.reviewVariantId,
+      hasUnsavedChanges: true,
+    };
+  }),
   leaveCanvas: (choice) => set((state) => {
     let layers = state.layers;
     let selectionDraft = state.selectionDraft;
@@ -352,6 +419,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           }
           : layer);
       }
+    } else if (choice === 'keep' && state.activeLayerId) {
+      // Back only hides the editor: the prompt and the selection are kept with the layer, nothing else changes. What is
+      // applied to the 360 view, the results and the generations that are still running are all left alone.
+      const draft = state.selectionDraft;
+      if (draft) {
+        layers = layers.map((layer): Layer => layer.id === state.activeLayerId
+          ? { ...layer, prompt: draft.prompt, selection: draft }
+          : layer);
+      }
     }
     return {
       layers,
@@ -362,6 +438,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       activeLayerId: null,
       viewLock: null,
       editSnapshot: null,
+      reviewVariantId: null,
       dirty: false,
       generatedVariants: [],
       selectedVariantId: null,
@@ -376,11 +453,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     layers: state.layers.map((layer) => layer.id === id ? { ...layer, ...patch } : layer),
     hasUnsavedChanges: true,
   })),
-  removeLayer: (id) => set((state) => ({
-    layers: state.layers.filter((layer) => layer.id !== id),
-    activeLayerId: state.activeLayerId === id ? null : state.activeLayerId,
-    hasUnsavedChanges: true,
-  })),
+  removeLayer: (id) => set((state) => {
+    const generations = { ...state.generations };
+    delete generations[id];
+    return {
+      layers: state.layers.filter((layer) => layer.id !== id),
+      activeLayerId: state.activeLayerId === id ? null : state.activeLayerId,
+      generations,
+      hasUnsavedChanges: true,
+    };
+  }),
   // Note: variant cache files are NOT deleted on removeLayer to avoid
   // accidental data loss. Cache dir is cleaned on reset.
   toggleLayerVisibility: (id) => set((state) => ({
@@ -413,6 +495,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     imageHeight: 0,
     imageMode: '360',
     layers: [],
+    marks: [],
+    marksUi: { ...get().marksUi, draw: false },
+    marksRun: null,
+    marksFailures: [],
+    reviewVariantId: null,
+    applyingLayerId: null,
+    generations: {},
     horizon: { ...defaultHorizon },
     workflow: 'empty',
     viewPose: { ...defaultPose },

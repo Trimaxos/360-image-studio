@@ -33,7 +33,7 @@ export default function Viewer360() {
       if (disposed || !containerRef.current) return;
       const viewer = new Viewer({
         container: containerRef.current,
-        panorama: api.image.serveUrl(imagePath, 4096),
+        panorama: api.image.serveUrl(imagePath),
         navbar: false,
         defaultZoomLvl: 27.272727,
         minFov: 10,

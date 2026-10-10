@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { LayerVariant } from '../../shared/types';
 import { api } from '../lib/api';
+import { applyVariantToPanorama } from '../lib/apply-variant';
+import { compositeStroke, createStrokeBuffer, stampStroke, stepBrushSize, unionRect, type DirtyRect, type StrokeBuffer } from '../lib/brush-stroke';
 import { useProjectStore } from '../stores/project';
 import VariantTransformEditor from './VariantTransformEditor';
 
@@ -18,6 +20,10 @@ export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
   const showOriginalRef = useRef(false);
   const drawingRef = useRef(false);
   const lastRef = useRef<{ x: number; y: number } | undefined>(undefined);
+  // The stroke being painted: its merged dab alphas, the mask as it was when it began, and the pixels being rewritten.
+  const strokeRef = useRef<{ buffer: StrokeBuffer; base: Uint8ClampedArray; work: ImageData } | null>(null);
+  // Alt + right-drag resizes the two rings: the start point and the values they had then.
+  const adjustRef = useRef<{ x: number; y: number; size: number; hardness: number } | null>(null);
   const undoRef = useRef<string[]>([]);
   const redoRef = useRef<string[]>([]);
   const [tool, setTool] = useState<Tool>('erase');
@@ -31,6 +37,8 @@ export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
   const [hardness, setHardness] = useState(variant.visibilityMask?.brushHardness ?? 80);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState('');
+  const [applying, setApplying] = useState(false);
+  const [applyError, setApplyError] = useState('');
   const [showOriginal, setShowOriginal] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [spaceHeld, setSpaceHeld] = useState(false);
@@ -252,42 +260,56 @@ export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
     return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
   }, []);
 
+  // [ / ] change the brush size (outer ring), Shift+[ / Shift+] the solid core (inner ring), as in image editors.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.target instanceof HTMLElement && ['INPUT', 'TEXTAREA'].includes(event.target.tagName)) return;
+      if (event.code !== 'BracketLeft' && event.code !== 'BracketRight') return;
+      event.preventDefault();
+      const up = event.code === 'BracketRight';
+      if (event.shiftKey) setHardness((value) => Math.min(100, Math.max(0, value + (up ? 10 : -10))));
+      else setSize((value) => stepBrushSize(value, up));
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   const point = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     const bounds = event.currentTarget.getBoundingClientRect();
     const scale = event.currentTarget.width / bounds.width;
     return { x: (event.clientX - bounds.left) * scale, y: (event.clientY - bounds.top) * scale, scale };
   };
-  const stamp = (x: number, y: number) => {
-    const context = maskRef.current!.getContext('2d')!;
-    const radius = Math.max(1, size / 2), inner = radius * hardness / 100;
-    const value = tool === 'erase' ? 0 : 255;
-    const gradient = context.createRadialGradient(x, y, inner, x, y, radius);
-    gradient.addColorStop(0, `rgba(${value},${value},${value},1)`);
-    if (inner < radius) gradient.addColorStop(Math.max(.001, hardness / 100), `rgba(${value},${value},${value},1)`);
-    gradient.addColorStop(1, `rgba(${value},${value},${value},0)`);
-    context.save(); context.globalAlpha = opacity / 100; context.fillStyle = gradient;
-    context.beginPath(); context.arc(x, y, radius, 0, Math.PI * 2); context.fill(); context.restore();
+  const beginStroke = () => {
+    const mask = maskRef.current!;
+    const work = mask.getContext('2d', { willReadFrequently: true })!.getImageData(0, 0, mask.width, mask.height);
+    strokeRef.current = { buffer: createStrokeBuffer(mask.width, mask.height), base: work.data.slice(), work };
   };
   const paintTo = (next: { x: number; y: number }) => {
+    const stroke = strokeRef.current, mask = maskRef.current;
+    if (!stroke || !mask) return;
     const previous = lastRef.current ?? next;
-    const steps = Math.max(1, Math.ceil(Math.hypot(next.x - previous.x, next.y - previous.y) / Math.max(1, size / 8)));
+    const radius = Math.max(1, size / 2);
+    const steps = Math.max(1, Math.ceil(Math.hypot(next.x - previous.x, next.y - previous.y) / Math.max(1, radius / 4)));
+    let dirty: DirtyRect | null = null;
     for (let index = 1; index <= steps; index += 1) {
       const ratio = index / steps;
-      stamp(previous.x + (next.x - previous.x) * ratio, previous.y + (next.y - previous.y) * ratio);
+      dirty = unionRect(dirty, stampStroke(stroke.buffer, previous.x + (next.x - previous.x) * ratio,
+        previous.y + (next.y - previous.y) * ratio, radius, hardness));
     }
     lastRef.current = next;
-    const padding = size / 2 + 2;
-    const left = Math.min(previous.x, next.x) - padding;
-    const top = Math.min(previous.y, next.y) - padding;
-    redraw({
-      x: left,
-      y: top,
-      width: Math.abs(next.x - previous.x) + padding * 2,
-      height: Math.abs(next.y - previous.y) + padding * 2,
-    });
+    if (!dirty) return;
+    compositeStroke(stroke.base, stroke.work.data, stroke.buffer, dirty, tool, opacity);
+    mask.getContext('2d')!.putImageData(stroke.work, 0, 0, dirty.x, dirty.y, dirty.width, dirty.height);
+    redraw(dirty);
   };
   const startPaint = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (!ready || !maskRef.current) return;
+    if (event.button === 2 && event.altKey) {
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      adjustRef.current = { x: event.clientX, y: event.clientY, size, hardness };
+      return;
+    }
     // Middle-click, or holding Space while left-click-dragging, pans the
     // zoomed view instead of painting — no need to reach for the scrollbars.
     if (event.button === 1 || (event.button === 0 && spaceHeld)) {
@@ -308,9 +330,17 @@ export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
     undoRef.current.push(maskRef.current.toDataURL());
     if (undoRef.current.length > 30) undoRef.current.shift();
     redoRef.current = []; drawingRef.current = true;
+    beginStroke();
     const next = point(event); lastRef.current = next; paintTo(next); refreshHistory((value) => value + 1);
   };
   const movePaint = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (adjustRef.current) {
+      // Horizontal drag changes the size (outer ring), vertical drag the solid core (inner ring); the rings stay put.
+      const start = adjustRef.current;
+      setSize(Math.min(300, Math.max(1, Math.round(start.size + (event.clientX - start.x) * 2))));
+      setHardness(Math.min(100, Math.max(0, Math.round(start.hardness - (event.clientY - start.y) / 2))));
+      return;
+    }
     if (panRef.current) {
       const workspace = workspaceRef.current;
       if (workspace) {
@@ -330,7 +360,10 @@ export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
     });
     if (drawingRef.current) paintTo(next);
   };
-  const stopPaint = () => { drawingRef.current = false; lastRef.current = undefined; panRef.current = null; setIsPanning(false); };
+  const stopPaint = () => {
+    drawingRef.current = false; lastRef.current = undefined; strokeRef.current = null; adjustRef.current = null;
+    panRef.current = null; setIsPanning(false);
+  };
   const resetMask = () => {
     const mask = maskRef.current; if (!mask) return;
     undoRef.current.push(mask.toDataURL()); redoRef.current = [];
@@ -343,13 +376,26 @@ export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
     const context = mask.getContext('2d')!; context.fillStyle = '#000'; context.fillRect(0, 0, mask.width, mask.height);
     redraw(); refreshHistory((value) => value + 1);
   };
-  const save = () => {
-    const mask = maskRef.current; if (!mask) return;
-    useProjectStore.getState().updateVariantMask(layerId, variant.id, {
+  // "Áp dụng chỉnh sửa" is an Apply: the mask is saved on this result and the result is put on the 360 view. If the 360 view
+  // cannot be updated the editor stays open with the reason (the mask is already saved, nothing else has changed).
+  const save = async () => {
+    const mask = maskRef.current; if (!mask || applying) return;
+    const store = useProjectStore.getState();
+    store.updateVariantMask(layerId, variant.id, {
       base64Mask: mask.toDataURL('image/png').split(',')[1], brushSize: size,
       brushSoftness: 100 - hardness, brushOpacity: opacity, brushHardness: hardness,
     });
-    onClose();
+    store.setReviewVariant(variant.id);
+    setApplyError('');
+    setApplying(true);
+    try {
+      await applyVariantToPanorama(layerId, variant.id);
+      onClose();
+    } catch (error) {
+      setApplyError(error instanceof Error ? error.message : 'Không thể áp kết quả vào panorama.');
+    } finally {
+      setApplying(false);
+    }
   };
 
   const clampZoom = (value: number) => Math.min(12, Math.max(.25, value));
@@ -401,7 +447,8 @@ export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
 
   return <div className={`result-mask-backdrop ${fullscreen ? 'fullscreen' : ''}`} role="dialog" aria-modal="true" aria-label="Chỉnh sửa vùng hiển thị">
     <div className={`result-mask-modal ${fullscreen ? 'fullscreen' : ''}`}>
-      <header className="result-mask-header"><div><h2>Tinh chỉnh kết quả</h2><p>Xóa phần AI không cần thiết hoặc phục hồi lại bất cứ lúc nào.</p></div><div className="result-mask-header-actions"><button className={mode === 'mask' ? 'active' : ''} onClick={() => setMode('mask')} title="Brush xóa / phục hồi">🖌 Mask</button><button className={mode === 'transform' ? 'active' : ''} onClick={() => setMode('transform')} title="Kéo-thả căn chỉnh, phóng to/thu nhỏ (Ctrl+T)">✥ Căn chỉnh</button>{variant.needsFit && <span className="variant-needs-fit">⚠ Lệch tỉ lệ</span>}{mode === 'mask' && <button className={`compare ${showOriginal ? 'active' : ''}`} onClick={toggleOriginal}>◉ {showOriginal ? 'Ẩn ảnh gốc' : 'Hiện ảnh gốc'}</button>}<button onClick={() => setFullscreen((value) => !value)} aria-label={fullscreen ? 'Thu nhỏ popup' : 'Phóng to popup'} title={fullscreen ? 'Thu nhỏ popup' : 'Phóng to popup toàn màn hình'}>{fullscreen ? '⤢' : '⛶'}</button>{mode === 'mask' && <button className="primary" onClick={save}>✓ Áp dụng chỉnh sửa</button>}<button onClick={onClose} aria-label="Đóng">✕</button></div></header>
+      <header className="result-mask-header"><div><h2>Tinh chỉnh kết quả</h2><p>Xóa phần AI không cần thiết hoặc phục hồi lại bất cứ lúc nào.</p></div><div className="result-mask-header-actions"><button className={mode === 'mask' ? 'active' : ''} onClick={() => setMode('mask')} title="Brush xóa / phục hồi">🖌 Mask</button><button className={mode === 'transform' ? 'active' : ''} onClick={() => setMode('transform')} title="Kéo-thả căn chỉnh, phóng to/thu nhỏ (Ctrl+T)">✥ Căn chỉnh</button>{variant.needsFit && <span className="variant-needs-fit">⚠ Lệch tỉ lệ</span>}{mode === 'mask' && <button className={`compare ${showOriginal ? 'active' : ''}`} onClick={toggleOriginal}>◉ {showOriginal ? 'Ẩn ảnh gốc' : 'Hiện ảnh gốc'}</button>}<button onClick={() => setFullscreen((value) => !value)} aria-label={fullscreen ? 'Thu nhỏ popup' : 'Phóng to popup'} title={fullscreen ? 'Thu nhỏ popup' : 'Phóng to popup toàn màn hình'}>{fullscreen ? '⤢' : '⛶'}</button>{mode === 'mask' && <button className="primary" disabled={applying} onClick={() => void save()}>{applying ? 'Đang áp…' : '✓ Áp dụng chỉnh sửa'}</button>}<button onClick={onClose} aria-label="Đóng">✕</button></div></header>
+      {applyError && <p className="result-mask-apply-error" role="alert">{applyError}</p>}
       {mode === 'transform' ? (
         <VariantTransformEditor
           layerId={layerId}
@@ -413,11 +460,15 @@ export default function ResultMaskEditor({ layerId, variant, onClose }: Props) {
       ) : (
       <>
       <div className="result-mask-tools">
-        <div className="result-mask-mode"><button className={tool === 'erase' ? 'active erase' : ''} onClick={() => setTool('erase')}>⌫ Xóa</button><button className={tool === 'restore' ? 'active restore' : ''} onClick={() => setTool('restore')}>♻ Phục hồi</button><button onClick={resetMask}>Phục hồi toàn bộ</button><button onClick={clearMask}>Xóa toàn bộ</button><button disabled={!undoRef.current.length} onClick={undo} title="Undo (Ctrl+Z)">↶</button><button disabled={!redoRef.current.length} onClick={redo} title="Redo (Ctrl+Y)">↷</button><details className="result-mask-help-popover"><summary aria-label="Hướng dẫn sử dụng brush" title="Hướng dẫn sử dụng"><span>i</span></summary><div><strong>Hướng dẫn brush:</strong><ul><li><b>Xóa:</b> quét vùng muốn trong suốt</li><li><b>Phục hồi:</b> lấy lại pixel gốc</li><li><b>Độ cứng = 0:</b> viền mờ dần (feather)</li><li><b>Độ mờ &lt; 100%:</b> xóa/phục hồi bán phần</li><li>Ctrl+Z / Ctrl+Y để undo/redo</li><li>Giữ <b>Space</b> hoặc chuột giữa để kéo di chuyển ảnh khi đã zoom</li></ul></div></details></div>
-        <div className="result-mask-sliders"><label>Kích thước <strong>{size}px</strong><input type="range" min="1" max="300" value={size} onChange={(event) => setSize(+event.target.value)} /></label><label>Độ mờ <strong>{opacity}%</strong><input type="range" min="5" max="100" value={opacity} onChange={(event) => setOpacity(+event.target.value)} /></label><label>Độ cứng <strong>{hardness}%</strong><input type="range" min="0" max="100" value={hardness} onChange={(event) => setHardness(+event.target.value)} /></label></div>
+        <div className="result-mask-mode"><button className={tool === 'erase' ? 'active erase' : ''} onClick={() => setTool('erase')}>⌫ Xóa</button><button className={tool === 'restore' ? 'active restore' : ''} onClick={() => setTool('restore')}>♻ Phục hồi</button><button onClick={resetMask}>Phục hồi toàn bộ</button><button onClick={clearMask}>Xóa toàn bộ</button><button disabled={!undoRef.current.length} onClick={undo} title="Undo (Ctrl+Z)">↶</button><button disabled={!redoRef.current.length} onClick={redo} title="Redo (Ctrl+Y)">↷</button><details className="result-mask-help-popover"><summary aria-label="Hướng dẫn sử dụng brush" title="Hướng dẫn sử dụng"><span>i</span></summary><div><strong>Hướng dẫn brush:</strong><ul><li><b>Xóa:</b> quét vùng muốn trong suốt</li><li><b>Phục hồi:</b> lấy lại pixel gốc</li><li><b>Vòng trong:</b> vùng nét 100% · <b>Vòng ngoài:</b> hết vùng mờ dần</li><li><b>[ / ]</b> đổi kích thước · <b>Shift+[ / ]</b> đổi vùng nét</li><li><b>Alt + kéo chuột phải:</b> ngang đổi kích thước, dọc đổi vùng nét</li><li><b>Độ mờ &lt; 100%:</b> mức tối đa của một nét, rê nhiều lần trong cùng nét không đậm thêm</li><li>Ctrl+Z / Ctrl+Y để undo/redo</li><li>Giữ <b>Space</b> hoặc chuột giữa để kéo di chuyển ảnh khi đã zoom</li></ul></div></details></div>
+        <div className="result-mask-sliders"><label>Kích thước (vòng ngoài) <strong>{size}px</strong><input type="range" min="1" max="300" value={size} onChange={(event) => setSize(+event.target.value)} /></label><label>Độ mờ <strong>{opacity}%</strong><input type="range" min="5" max="100" value={opacity} onChange={(event) => setOpacity(+event.target.value)} /></label><label>Vùng nét (vòng trong) <strong>{hardness}%</strong><input type="range" min="0" max="100" value={hardness} onChange={(event) => setHardness(+event.target.value)} /></label></div>
       </div>
       <div className="result-mask-zoom"><button onClick={() => changeZoom(zoom / 1.25)} aria-label="Thu nhỏ">−</button><strong>{Math.round(zoom * 100)}%</strong><button onClick={() => changeZoom(zoom * 1.25)} aria-label="Phóng to">+</button><button onClick={() => setZoom(1)}>Vừa khung</button><span>Ctrl + con lăn để zoom · Giữ Space hoặc chuột giữa để kéo di chuyển</span></div>
-      <div ref={workspaceRef} className="result-mask-workspace" onMouseLeave={() => setCursor(undefined)}><div className="result-mask-canvas-shell" style={{ width: fittedSize.width * zoom || undefined, height: fittedSize.height * zoom || undefined }}><canvas ref={displayRef} style={{ cursor: isPanning ? 'grabbing' : spaceHeld ? 'grab' : 'none', ...(fittedSize.width ? { width: fittedSize.width * zoom, height: fittedSize.height * zoom } : undefined) }} onPointerDown={startPaint} onPointerMove={movePaint} onPointerUp={stopPaint} onPointerCancel={stopPaint} /></div>{!ready && !loadError && <span className="result-mask-loading">Đang tải ảnh…</span>}{loadError && <span className="result-mask-loading error">{loadError}</span>}{cursor && !isPanning && !spaceHeld && <span className="result-mask-cursor" style={{ left: cursor.x, top: cursor.y, width: size / cursor.scale, height: size / cursor.scale }} />}</div>
+      <div ref={workspaceRef} className="result-mask-workspace" onMouseLeave={() => setCursor(undefined)}><div className="result-mask-canvas-shell" style={{ width: fittedSize.width * zoom || undefined, height: fittedSize.height * zoom || undefined }}><canvas ref={displayRef} style={{ cursor: isPanning ? 'grabbing' : spaceHeld ? 'grab' : 'none', ...(fittedSize.width ? { width: fittedSize.width * zoom, height: fittedSize.height * zoom } : undefined) }} onPointerDown={startPaint} onPointerMove={movePaint} onPointerUp={stopPaint} onPointerCancel={stopPaint} onContextMenu={(event) => event.preventDefault()} /></div>{!ready && !loadError && <span className="result-mask-loading">Đang tải ảnh…</span>}{loadError && <span className="result-mask-loading error">{loadError}</span>}{cursor && !isPanning && !spaceHeld && <>
+        <span className="result-mask-cursor" style={{ left: cursor.x, top: cursor.y, width: size / cursor.scale, height: size / cursor.scale }} />
+        {hardness > 0 && hardness < 100 && <span className="result-mask-cursor inner" style={{ left: cursor.x, top: cursor.y,
+          width: size * hardness / 100 / cursor.scale, height: size * hardness / 100 / cursor.scale }} />}
+      </>}</div>
       </>
       )}
     </div>

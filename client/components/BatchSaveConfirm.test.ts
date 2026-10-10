@@ -59,3 +59,11 @@ test('saving is blocked when the project cannot be saved yet but discarding stay
   await act(async () => buttons()[1].click());
   assert.deepEqual(calls, ['discard']);
 });
+
+test('the question is about saving the open project (Lưu writes into its file now), not about saving "into the batch"', async (t) => {
+  const { container } = await renderConfirm(t, {});
+  const text = container.textContent ?? '';
+  assert.doesNotMatch(text, /vào batch/);
+  assert.match(text, /lưu trước khi tiếp tục/);
+  assert.match(text, /file project/, 'says where the save goes');
+});

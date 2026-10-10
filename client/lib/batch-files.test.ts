@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { ProjectFile } from '../../shared/types';
 import {
   allocateBatchFile, exportBatchToDirectory, pickBatchDirectory,
-  safeBatchStem, updateProjectFile, writeProjectToDirectory,
+  safeBatchStem, updateProjectFile,
 } from './batch-files';
 
 function fakeDirectory(existing: string[] = []) {
@@ -45,12 +45,14 @@ test('safe stems preserve Unicode and strip paths, extension, invalid and reserv
   assert.equal(safeBatchStem('e\u0301.png'), 'é');
 });
 
-test('project writes suffix disk and reserved collisions; explicit update reuses handle', async () => {
+test('allocation suffixes disk and reserved collisions; explicit update reuses handle', async () => {
   const { directory, files } = fakeDirectory(['Ảnh.360project']);
   const reserved = new Set(['ảnh (2).360project']);
-  const first = await writeProjectToDirectory(directory, 'Ảnh.jpg', new Blob(['first']), reserved);
+  const first = await allocateBatchFile(directory, 'Ảnh.jpg', '360project', reserved);
+  await updateProjectFile(first.handle, new Blob(['first']));
   assert.equal(first.name, 'Ảnh (3).360project');
-  const second = await writeProjectToDirectory(directory, 'Ảnh', new Blob(['second']), reserved);
+  const second = await allocateBatchFile(directory, 'Ảnh', '360project', reserved);
+  await updateProjectFile(second.handle, new Blob(['second']));
   assert.equal(second.name, 'Ảnh (4).360project');
   assert.equal(await files.get('Ảnh.360project')!.text(), 'old');
   await updateProjectFile(first.handle, new Blob(['updated']));

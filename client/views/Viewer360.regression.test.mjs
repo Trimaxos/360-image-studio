@@ -7,6 +7,7 @@ const appSource = await readFile(new URL('../App.tsx', import.meta.url), 'utf8')
 const viewerSource = await readFile(new URL('./Viewer360.tsx', import.meta.url), 'utf8');
 const themeSource = await readFile(new URL('../styles/theme.css', import.meta.url), 'utf8');
 const rightSidebarSource = await readFile(new URL('../components/RightSidebar.tsx', import.meta.url), 'utf8');
+const fileMenuSource = await readFile(new URL('../components/FileMenu.tsx', import.meta.url), 'utf8');
 
 test('loads the application and Photo Sphere Viewer stylesheets', () => {
   assert.match(mainSource, /import ['"]\.\/styles\/theme\.css['"]/);
@@ -44,7 +45,8 @@ test('updates the view FOV in degrees instead of zoom percentage', () => {
 });
 
 test('keeps file actions from crushing the top-bar tabs', () => {
-  assert.match(appSource, /<details className=["']file-menu["']/);
+  assert.match(appSource, /<FileMenu\b/);
+  assert.match(fileMenuSource, /<details className=["']file-menu["']/);
   assert.match(themeSource, /\.top-bar-tab\s*\{[^}]*white-space:\s*nowrap/s);
 });
 

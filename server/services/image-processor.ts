@@ -1,6 +1,7 @@
 import sharp from 'sharp';
 import path from 'path';
 import fs from 'fs/promises';
+import { createHash, randomUUID } from 'crypto';
 import type { ImageMeta, Horizon, Layer } from '../../shared/types';
 
 export const CACHE_DIR = process.env.CACHE_DIR
@@ -35,6 +36,16 @@ export async function openImage(imagePath: string): Promise<ImageMeta> {
     format: formatMap[fmt] || 'jpeg',
     sizeBytes: stat.size,
   };
+}
+
+/**
+ * True when the browser can show this file exactly as it is: a format it decodes and no EXIF rotation.
+ * The server's crops ignore EXIF, so a rotated copy would no longer line up with them.
+ */
+export async function canServeOriginal(imagePath: string): Promise<boolean> {
+  if (!/\.(jpe?g|png|webp)$/i.test(imagePath)) return false;
+  const { orientation } = await sharp(imagePath).metadata();
+  return !orientation || orientation === 1;
 }
 
 export async function serveImage(
@@ -79,28 +90,36 @@ export async function getTile(
     .toBuffer();
 }
 
-export async function exportImage(
-  imagePath: string,
-  format: 'jpeg' | 'jpg' | 'png' | 'webp' | 'avif',
-  quality: number,
-  layers: Layer[],
-  _horizon: Horizon
-): Promise<Buffer> {
-  await ensureCacheDir();
+type LayerComposite = { input: string | Buffer; top: number; left: number; blend: 'over' };
 
-  // Start with original image
-  let pipeline = sharp(imagePath);
-  const sourceMeta = await sharp(imagePath).metadata();
-  const panoramaSize = {
-    width: sourceMeta.width ?? 8192,
-    height: sourceMeta.height ?? 4096,
+/**
+ * The pieces that the applied layers add on top of the original, bottom to top, ready for sharp's composite().
+ * With scale 1 every piece is handed over as it is (export). Below 1 each piece is shrunk and placed for a smaller
+ * canvas (the Flat View changes overlay).
+ */
+export async function layerComposites(
+  layers: Layer[],
+  panoramaSize: { width: number; height: number },
+  scale: number,
+): Promise<LayerComposite[]> {
+  // Collect all composites first, then apply in a single call so every layer
+  // stacks correctly.  Chaining .composite() in a loop can overwrite earlier ops.
+  const composites: LayerComposite[] = [];
+  const add = async (input: string | Buffer, left: number, top: number, size?: { width?: number; height?: number }) => {
+    if (scale === 1) {
+      composites.push({ input, top, left, blend: 'over' });
+      return;
+    }
+    const natural = size ?? await sharp(input).metadata();
+    const shrunk = await sharp(input)
+      .resize(Math.max(1, Math.round((natural.width ?? 1) * scale)), Math.max(1, Math.round((natural.height ?? 1) * scale)), { fit: 'fill' })
+      .png({ compressionLevel: 1 })
+      .toBuffer();
+    composites.push({ input: shrunk, top: Math.round(top * scale), left: Math.round(left * scale), blend: 'over' });
   };
 
   // Composite layers in order (bottom to top).
-  // Collect all composites first, then apply in a single call so every layer
-  // stacks correctly.  Chaining .composite() in a loop can overwrite earlier ops.
   const sortedLayers = exportableLayers(layers);
-  const composites: Array<{ input: string | Buffer; top: number; left: number; blend: 'over' }> = [];
 
   console.log(`[export] total layers: ${layers.length}, exportable: ${sortedLayers.length}`);
   for (const layer of sortedLayers) {
@@ -137,7 +156,7 @@ export async function exportImage(
             const eqFile = path.join(CACHE_DIR, `${equirectId}.png`);
             try {
               await fs.access(eqFile);
-              composites.push({ input: eqFile, top: 0, left: 0, blend: 'over' });
+              await add(eqFile, 0, 0, panoramaSize);
               continue;
             } catch { /* fall through */ }
           }
@@ -162,7 +181,7 @@ export async function exportImage(
           } finally {
             if (maskedTempPath) await fs.unlink(maskedTempPath).catch(() => undefined);
           }
-          composites.push({ input: reprojected, top: 0, left: 0, blend: 'over' });
+          await add(reprojected, 0, 0, panoramaSize);
           continue;
         }
 
@@ -181,20 +200,10 @@ export async function exportImage(
             appliedVariant.width,
             appliedVariant.height,
           );
-          composites.push({
-            input: maskedResult,
-            top: Math.round(tileY),
-            left: Math.round(tileX),
-            blend: 'over',
-          });
+          await add(maskedResult, Math.round(tileX), Math.round(tileY));
         } else {
           // No visibility mask — blend full variant tile with its natural alpha
-          composites.push({
-            input: variantFile,
-            top: Math.round(tileY),
-            left: Math.round(tileX),
-            blend: 'over',
-          });
+          await add(variantFile, Math.round(tileX), Math.round(tileY));
         }
       } catch {
         console.log(`[export] variant cache file missing: ${appliedVariant.resultImageId}, skipping layer`);
@@ -202,6 +211,27 @@ export async function exportImage(
     }
   }
 
+  return composites;
+}
+
+export async function exportImage(
+  imagePath: string,
+  format: 'jpeg' | 'jpg' | 'png' | 'webp' | 'avif',
+  quality: number,
+  layers: Layer[],
+  _horizon: Horizon
+): Promise<Buffer> {
+  await ensureCacheDir();
+
+  // Start with original image
+  let pipeline = sharp(imagePath);
+  const sourceMeta = await sharp(imagePath).metadata();
+  const panoramaSize = {
+    width: sourceMeta.width ?? 8192,
+    height: sourceMeta.height ?? 4096,
+  };
+
+  const composites = await layerComposites(layers, panoramaSize, 1);
   if (composites.length > 0) {
     pipeline = pipeline.composite(composites);
   }
@@ -217,6 +247,51 @@ export async function exportImage(
   };
 
   return pipeline.toFormat(encodeFormat as any, formatOptions[encodeFormat]).toBuffer();
+}
+
+/**
+ * One transparent picture holding every applied, visible layer, no wider than `maxWidth` (never enlarged): the Flat
+ * View lays it over the original to show what changed. Cached under a hash of what makes it, so asking again is free.
+ */
+export async function buildChangesOverlay(
+  imagePath: string,
+  layers: Layer[],
+  maxWidth = 4096,
+): Promise<{ id: string; width: number; height: number }> {
+  await ensureCacheDir();
+  const meta = await sharp(imagePath).metadata();
+  const panoramaSize = { width: meta.width ?? 8192, height: meta.height ?? 4096 };
+  const scale = Math.min(1, maxWidth / panoramaSize.width);
+  const width = Math.max(1, Math.round(panoramaSize.width * scale));
+  const height = Math.max(1, Math.round(panoramaSize.height * scale));
+
+  // The key holds what the pixels depend on, not the prompt, the name or the results a layer is not showing.
+  const id = createHash('sha256').update(JSON.stringify({
+    version: 1,
+    width,
+    height,
+    layers: exportableLayers(layers).map(({ prompt, name, variants, ...layer }) => ({
+      ...layer,
+      applied: variants?.find((variant) => variant.applied),
+      singleVariant: (variants?.length ?? 0) <= 1, // decides whether the layer's own equirect picture may be used
+    })),
+  })).digest('hex');
+  const file = path.join(CACHE_DIR, `${id}.png`);
+  try {
+    await fs.access(file);
+    return { id, width, height };
+  } catch { /* not built yet */ }
+
+  const composites = await layerComposites(layers, panoramaSize, scale);
+  const png = await sharp({ create: { width, height, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .composite(composites)
+    .png()
+    .toBuffer();
+  // Written under another name first: a request for the same overlay must never read a half-written file.
+  const partial = path.join(CACHE_DIR, `${id}.${randomUUID()}.tmp`);
+  await fs.writeFile(partial, png);
+  await fs.rename(partial, file);
+  return { id, width, height };
 }
 
 export function exportableLayers(layers: Layer[]): Layer[] {

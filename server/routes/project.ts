@@ -1,10 +1,12 @@
 import { Router } from 'express';
-import fs from 'fs/promises';
+import fs, { type FileHandle } from 'fs/promises';
 import multer from 'multer';
 import path from 'path';
+import { pipeline } from 'stream/promises';
 import { ZipArchive } from 'archiver';
 import AdmZip from 'adm-zip';
 import { createHash, randomUUID } from 'crypto';
+import { config } from '../config';
 import { CACHE_DIR } from '../services/image-processor';
 import type { ImageMode, ProjectFile } from '../../shared/types';
 
@@ -63,15 +65,13 @@ const zipUpload = multer({
   limits: { fileSize: 500 * 1024 * 1024 },
 });
 
-// Download project as ZIP bundle (.360project)
-projectRouter.post('/download', async (req, res) => {
+/**
+ * Bundle a project as a .360project zip into `output`: the original image, every cache picture its
+ * layers use and project.json with relative paths. Resolves once `output` has taken the whole archive.
+ */
+export async function writeProjectArchive(project: ProjectFile, output: NodeJS.WritableStream): Promise<void> {
+  const tmpDir = path.join(CACHE_DIR, `project-zip-${randomUUID()}`);
   try {
-    const { project } = req.body as { project: ProjectFile };
-    if (!project?.imagePath) return res.status(400).json({ error: 'project with imagePath is required' });
-
-    await fs.access(project.imagePath);
-
-    const tmpDir = path.join(CACHE_DIR, `project-zip-${randomUUID()}`);
     await fs.mkdir(tmpDir, { recursive: true });
 
     // Copy original image
@@ -120,27 +120,75 @@ projectRouter.post('/download', async (req, res) => {
       'utf-8',
     );
 
-    // Stream ZIP to client
-    const baseName = path.basename(project.imagePath, origExt);
+    const archive = new ZipArchive({ zlib: { level: 1 } });
+    archive.directory(tmpDir, false);
+    await Promise.all([pipeline(archive, output), archive.finalize()]);
+  } finally {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+}
+
+// Download project as ZIP bundle (.360project)
+projectRouter.post('/download', async (req, res) => {
+  try {
+    const { project } = req.body as { project: ProjectFile };
+    if (!project?.imagePath) return res.status(400).json({ error: 'project with imagePath is required' });
+
+    await fs.access(project.imagePath);
+
+    const baseName = path.basename(project.imagePath, path.extname(project.imagePath));
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${baseName}.360project"`);
-
-    const archive = new ZipArchive({ zlib: { level: 1 } });
-    archive.on('error', (err) => {
-      if (!res.headersSent) {
-        res.status(500).json({ error: err.message });
-      }
-    });
-    archive.pipe(res);
-    archive.directory(tmpDir, false);
-    await archive.finalize();
-
-    // Cleanup temp dir
-    await fs.rm(tmpDir, { recursive: true, force: true });
+    await writeProjectArchive(project, res);
   } catch (err: any) {
     if (!res.headersSent) {
       res.status(500).json({ error: err.message });
     }
+  }
+});
+
+/** File name (no extension) for a saved project: no folders, nothing Windows rejects, no device names. */
+function projectFileStem(name: string | undefined, project: ProjectFile): string {
+  const wanted = name?.trim().replace(/\.360project$/i, '') || path.parse(project.originalName || project.imagePath).name;
+  const stem = (wanted.split(/[\\/]/).pop() ?? '')
+    .replace(/[<>:"|?*\u0000-\u001f]/g, '')
+    .replace(/[. ]+$/, '')
+    .trim();
+  if (!stem) return 'project';
+  return /^(con|prn|aux|nul|com\d|lpt\d)(\.|$)/i.test(stem) ? `_${stem}` : stem;
+}
+
+/** Opens the first free `<stem>.360project`, `<stem> (2).360project`, … so an earlier project is never overwritten. */
+async function claimProjectFile(dir: string, stem: string): Promise<{ file: string; handle: FileHandle }> {
+  for (let n = 1; n < 1000; n++) {
+    const file = path.join(dir, `${stem}${n === 1 ? '' : ` (${n})`}.360project`);
+    try {
+      return { file, handle: await fs.open(file, 'wx') };
+    } catch (err: any) {
+      if (err.code !== 'EEXIST') throw err;
+    }
+  }
+  throw new Error(`Too many projects named "${stem}" in ${dir}`);
+}
+
+// Save the project as a .360project straight into config.projectsDir, with no file dialog (browser automation)
+projectRouter.post('/save-to-folder', async (req, res) => {
+  let claimed: Awaited<ReturnType<typeof claimProjectFile>> | undefined;
+  try {
+    const { project, name } = req.body as { project: ProjectFile; name?: string };
+    if (!project?.imagePath) return res.status(400).json({ error: 'project with imagePath is required' });
+
+    await fs.access(project.imagePath);
+    await fs.mkdir(config.projectsDir, { recursive: true });
+    claimed = await claimProjectFile(config.projectsDir, projectFileStem(name, project));
+    await writeProjectArchive(project, claimed.handle.createWriteStream());
+    res.json({ path: claimed.file, name: path.basename(claimed.file) });
+  } catch (err: any) {
+    if (claimed) {
+      await claimed.handle.close().catch(() => undefined);
+      await fs.rm(claimed.file, { force: true });
+    }
+    res.status(500).json({ error: err.message });
   }
 });
 

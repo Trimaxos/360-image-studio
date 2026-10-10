@@ -10,7 +10,6 @@ import { useProjectStore } from '../stores/project';
 import { applyVariantToPanorama } from '../lib/apply-variant';
 import { composeVariantPreview } from '../lib/visibility-mask';
 import RegionSelectOverlay from './RegionSelectOverlay';
-import UnsavedChangesDialog from './UnsavedChangesDialog';
 import VariantGallery from './VariantGallery';
 import type { LayerVariant } from '../../shared/types';
 
@@ -19,11 +18,9 @@ export default function CanvasEditor() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fabricRef = useRef<any>(null);
   const resultInputRef = useRef<HTMLInputElement>(null);
-  const [backOpen, setBackOpen] = useState(false);
   const [sourceStatus, setSourceStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [sourceError, setSourceError] = useState('');
   const [exchangeMessage, setExchangeMessage] = useState('');
-  const [returningToView, setReturningToView] = useState(false);
   const [selectingRegion, setSelectingRegion] = useState(false);
   const [imageTransform, setImageTransform] = useState<{ left: number; top: number; scale: number } | null>(null);
   const selectedVariant = useMemo(
@@ -31,7 +28,9 @@ export default function CanvasEditor() {
     [state.generatedVariants, state.selectedVariantId],
   );
   const activeLayer = state.layers.find((l) => l.id === state.activeLayerId);
-  const appliedVariant = activeLayer?.variants?.find((v) => v.applied);
+  // The canvas shows the result being looked at (not necessarily the one applied to the 360 view).
+  const reviewVariant = activeLayer?.variants?.find((v) => v.id === state.reviewVariantId);
+  const applying = state.applyingLayerId !== null;
   const tile = activeLayer?.tileCoords ?? state.selectionDraft?.tileCoords;
   const originalSourceUrl = useMemo(() => {
     if (activeLayer?.type === 'perspective' && activeLayer.resultImageId) {
@@ -43,14 +42,14 @@ export default function CanvasEditor() {
       : api.image.serveUrl(state.imagePath, 4096);
   }, [activeLayer?.resultImageId, activeLayer?.type, state.imagePath, state.selectionDraft?.sourceView, tile?.x, tile?.y, tile?.w, tile?.h]);
   const sourceUrl = useMemo(() => {
-    // Applied variant takes priority — its cache file is the source of truth
-    if (appliedVariant?.resultImageId) {
-      return api.image.cacheUrl(appliedVariant.resultImageId);
+    // The result being looked at takes priority — its cache file is the source of truth
+    if (reviewVariant?.resultImageId) {
+      return api.image.cacheUrl(reviewVariant.resultImageId);
     }
     // Perspective layers: load from server cache via resultImageId
     return originalSourceUrl;
   }, [
-    appliedVariant?.resultImageId,
+    reviewVariant?.resultImageId,
     originalSourceUrl,
   ]);
 
@@ -69,8 +68,8 @@ export default function CanvasEditor() {
           backgroundColor: '#080808',
           selection: false,
         });
-        const displayUrl = appliedVariant?.visibilityMask?.base64Mask && originalSourceUrl
-          ? await composeVariantPreview(originalSourceUrl, sourceUrl, appliedVariant.visibilityMask.base64Mask)
+        const displayUrl = reviewVariant?.visibilityMask?.base64Mask && originalSourceUrl
+          ? await composeVariantPreview(originalSourceUrl, sourceUrl, reviewVariant.visibilityMask.base64Mask)
           : sourceUrl;
         const image = await FabricImage.fromURL(displayUrl);
         if (!image.width || !image.height) {
@@ -119,7 +118,7 @@ export default function CanvasEditor() {
     state.imagePath,
     sourceUrl,
     originalSourceUrl,
-    appliedVariant?.visibilityMask?.base64Mask,
+    reviewVariant?.visibilityMask?.base64Mask,
     state.selectionDraft?.sourceView,
     tile?.x,
     tile?.y,
@@ -127,31 +126,22 @@ export default function CanvasEditor() {
     tile?.h,
   ]);
 
-  const leaveForView = async (choice: 'save' | 'discard') => {
-    const current = useProjectStore.getState();
-    const layer = current.layers.find((item) => item.id === current.activeLayerId);
-    const selected = layer?.variants?.find((variant) => variant.applied);
-    if (choice === 'save' && selected?.needsFit) {
-      setExchangeMessage('Kết quả đang lệch tỉ lệ — mở ✎ Edit → Căn chỉnh xong rồi mới áp dụng.');
-      return;
-    }
-    setReturningToView(true);
-    setExchangeMessage(selected ? 'Đang áp kết quả vào panorama…' : '');
+  // The only way a result reaches the 360 view from here: looking at a result never does.
+  const applyToView = async () => {
+    if (!activeLayer) return;
+    setExchangeMessage('');
     try {
-      if (layer && selected) await applyVariantToPanorama(layer.id, selected.id);
-      useProjectStore.getState().leaveCanvas(choice);
-      setBackOpen(false);
+      await applyVariantToPanorama(activeLayer.id, state.reviewVariantId);
+      setExchangeMessage('Đã áp dụng ra 360 View.');
     } catch (error) {
       setExchangeMessage(error instanceof Error ? error.message : 'Không thể áp kết quả vào panorama.');
-    } finally {
-      setReturningToView(false);
     }
   };
 
+  // Back only hides the editor: no question, nothing is applied, generations on this (or any) layer keep running.
   const back = () => {
-    if (returningToView) return;
-    if (state.dirty) setBackOpen(true);
-    else void leaveForView('discard');
+    if (applying) return;
+    state.leaveCanvas('keep');
   };
 
   const getSourceBlob = async () => {
@@ -216,7 +206,7 @@ export default function CanvasEditor() {
 
         // Add variant to layer and select it (deselects others automatically)
         state.addVariantToLayer(activeLayer.id, variant);
-        state.selectVariantForEditing(activeLayer.id, variant.id);
+        state.setReviewVariant(variant.id);
 
         const action = importedW > expectedW ? 'downscale' : 'upscale';
         setExchangeMessage(`Đã nạp kết quả và ${action} về ${expectedW} × ${expectedH}px.`);
@@ -239,7 +229,7 @@ export default function CanvasEditor() {
         createdAt: Date.now(),
       };
       state.addVariantToLayer(activeLayer.id, variant);
-      state.selectVariantForEditing(activeLayer.id, variant.id);
+      state.setReviewVariant(variant.id);
       state.setPendingFitVariant({ layerId: activeLayer.id, variantId });
       setExchangeMessage(
         `Ảnh nhập ${importedW}×${importedH} lệch tỉ lệ tile ${expectedW}×${expectedH} — kéo-thả để căn chỉnh rồi áp dụng.`,
@@ -295,7 +285,7 @@ export default function CanvasEditor() {
         createdAt: Date.now(),
       };
       state.addVariantToLayer(activeLayer.id, variant);
-      state.selectVariantForEditing(activeLayer.id, variant.id);
+      state.setReviewVariant(variant.id);
       state.setRegionEdit(null);
       setSelectingRegion(false);
     } catch (reason) {
@@ -316,8 +306,16 @@ export default function CanvasEditor() {
         }}
       />
       <div className="canvas-toolbar">
-        <button disabled={returningToView} onClick={back}>
-          {returningToView ? 'Applying…' : '← Back to View'}
+        <button disabled={applying} onClick={back}>← Back to View</button>
+        <button
+          className="canvas-apply-btn"
+          disabled={!activeLayer || applying || !!reviewVariant?.needsFit}
+          onClick={() => void applyToView()}
+          title={reviewVariant?.needsFit
+            ? 'Kết quả đang lệch tỉ lệ — căn chỉnh xong rồi mới áp dụng'
+            : 'Đẩy kết quả đang xem ra 360 View (chọn thẻ chỉ để xem, chưa đổi gì ở 360 View)'}
+        >
+          {applying ? 'Đang áp…' : '✓ Áp dụng ra 360'}
         </button>
         <span>{activeLayer ? `${activeLayer.tileCoords.w} × ${activeLayer.tileCoords.h}px` : 'Edit Canvas'}</span>
         <div className="canvas-toolbar-actions">
@@ -375,14 +373,6 @@ export default function CanvasEditor() {
       </div>
       {exchangeMessage && <div className="canvas-exchange-message">{exchangeMessage}</div>}
       <VariantGallery />
-      {backOpen && (
-        <UnsavedChangesDialog
-          onSave={() => { void leaveForView('save'); }}
-          onDiscard={() => state.leaveCanvas('discard')}
-          onCancel={() => setBackOpen(false)}
-          saving={returningToView}
-        />
-      )}
     </div>
   );
 }

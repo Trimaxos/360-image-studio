@@ -48,37 +48,6 @@ html, body, #root {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
-/* ===== Login ===== */
-.login-screen, .login-loading {
-  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
-  background: radial-gradient(circle at top, #173b68 0, var(--bg) 55%);
-}
-.login-loading { gap: 10px; color: var(--text2); }
-.login-dialog {
-  width: min(400px, calc(100% - 32px)); padding: 32px; border: 1px solid var(--border);
-  border-radius: 14px; background: rgba(22, 33, 62, .98); box-shadow: 0 24px 70px rgba(0, 0, 0, .45);
-}
-.login-brand { margin-bottom: 24px; font-size: 18px; font-weight: 700; }
-.login-brand strong { color: var(--accent); }
-.login-brand span { color: var(--text2); font-weight: 400; }
-.login-dialog h1 { margin-bottom: 8px; font-size: 24px; }
-.login-dialog > p { margin-bottom: 24px; color: var(--text2); font-size: 14px; }
-.login-dialog label { display: grid; gap: 7px; margin-bottom: 16px; color: #ccc; font-size: 13px; font-weight: 600; }
-.login-dialog input {
-  width: 100%; padding: 11px 12px; border: 1px solid var(--border); border-radius: 7px;
-  outline: none; background: var(--bg); color: var(--text); font-size: 14px;
-}
-.login-dialog input:focus { border-color: var(--accent); }
-.login-dialog button {
-  width: 100%; margin-top: 6px; padding: 11px; border: 0; border-radius: 7px;
-  background: var(--accent); color: #fff; cursor: pointer; font-size: 14px; font-weight: 700;
-}
-.login-dialog button:disabled { cursor: wait; opacity: .65; }
-.login-error {
-  margin: -3px 0 12px; padding: 9px 10px; border-radius: 6px;
-  background: rgba(233, 69, 96, .14); color: #ff9bac; font-size: 13px;
-}
-
 .placeholder {
   display: flex;
   align-items: center;
@@ -156,21 +125,6 @@ html, body, #root {
 .top-bar-file .filesize {
   color: #666;
   margin-left: 8px;
-}
-.logout-btn {
-  margin-left: auto;
-  padding: 7px 11px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text2);
-  cursor: pointer;
-  font-size: 12px;
-  white-space: nowrap;
-}
-.logout-btn:hover {
-  border-color: var(--accent);
-  color: var(--text);
 }
 
 .file-menu {
@@ -351,6 +305,7 @@ html, body, #root {
   border-bottom: 2px solid transparent;
   font-size: 13px;
   font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
 }
 .panel-tabs button:hover {
@@ -1006,6 +961,37 @@ html, body, #root {
   transform-origin: center;
   user-select: none;
 }
+/* Flat View: the switch for the merged "what changed" picture */
+.flat-changes-bar {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: 60%;
+}
+.flat-changes-btn {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 6px 14px;
+  border-radius: 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.flat-changes-btn:hover { border-color: var(--accent); }
+.flat-changes-btn.active { background: var(--accent); border-color: var(--accent); }
+.flat-changes-error {
+  background: #4a2020;
+  color: #ff9d9d;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+}
 .rect-select-overlay {
   position: absolute;
   inset: 0;
@@ -1067,6 +1053,8 @@ html, body, #root {
 .batch-error button { margin-left: 12px; }
 .batch-confirm { z-index: 1100; }
 .batch-working { position: fixed; inset: 0; z-index: 90; background: #0006; display: flex; justify-content: center; align-items: center; gap: 8px; color: white; }
+/* A note while the browser's folder picker is open: it must not dim or block the page like .batch-working. */
+.save-hint { position: fixed; left: 50%; bottom: 56px; transform: translateX(-50%); z-index: 95; max-width: 80vw; padding: 10px 16px; border-radius: 8px; background: #1f2937; color: #fff; font-size: 14px; box-shadow: 0 4px 16px #0006; pointer-events: none; }
 .rect-crop-options label { display: flex; align-items: center; gap: 8px; }
 .rect-crop-options select {
   padding: 6px 10px;
@@ -1484,6 +1472,27 @@ html, body, #root {
   z-index: 2;
 }
 
+/* Two badges can stack: "being looked at" in this editor, and "applied to the 360 view". */
+.variant-badges {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  z-index: 2;
+}
+
+.variant-badges .variant-badge {
+  position: static;
+}
+
+.variant-badge-360 {
+  background: #2d8cff;
+  color: #fff;
+}
+
 .variant-meta {
   padding: 4px 6px;
   font-size: 10px;
@@ -1573,6 +1582,14 @@ html, body, #root {
 }
 .result-mask-header button {
   padding: 7px 10px;
+}
+.result-mask-apply-error {
+  margin: 0 22px 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 13px;
 }
 .result-mask-header-actions {
   display: flex;
@@ -1790,6 +1807,11 @@ html, body, #root {
   pointer-events: none;
   transform: translate(-50%, -50%);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, .8);
+}
+/* Inner ring: the solid core of the brush (size × hardness); between the rings the brush fades out. */
+.result-mask-cursor.inner {
+  border-style: dashed;
+  border-color: #9333ea;
 }
 .result-mask-loading {
   position: absolute;
@@ -2119,4 +2141,45 @@ html, body, #root {
 .layer-item.hidden-layer {
   opacity: .48;
 }
+
+/* Generation state of a layer (it keeps running while the editor is closed). */
+.layer-job {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  line-height: 16px;
+}
+.layer-job.queued { background: #3a3a1f; color: #f2d46b; }
+.layer-job.running { background: #1f3a52; color: #7cc4ff; }
+.layer-job.failed { background: #4a2020; color: #ff9d9d; cursor: help; }
+
+/* ===== Khung cửa (đánh dấu trên Flat View) ===== */
+.marks-grid { stroke: rgba(255, 255, 0, .35); stroke-width: 1; }
+.marks-grid.strong { stroke: rgba(255, 255, 0, .75); }
+.marks-label { fill: #ffff66; stroke: #000; stroke-width: .15em; paint-order: stroke; font-weight: 700; }
+.marks-box { fill: rgba(46, 204, 113, .12); stroke: #2ecc71; stroke-width: 2; }
+.marks-name { fill: #2ecc71; stroke: #000; stroke-width: .15em; paint-order: stroke; font-weight: 700; }
+.marks-draw-overlay { position: absolute; inset: 0; z-index: 4; cursor: crosshair; touch-action: none; }
+.marks-draw-rect { position: absolute; border: 2px solid #2ecc71; background: rgba(46, 204, 113, .15); pointer-events: none; }
+.marks-panel { display: flex; flex-direction: column; gap: 8px; min-height: 0; padding: 10px 12px; overflow-y: auto; }
+.marks-options { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.marks-options label { display: flex; align-items: center; gap: 6px; }
+.marks-hint { margin: 0; font-size: 11px; color: var(--text2); overflow-wrap: anywhere; }
+.marks-hint code { color: #fff; }
+.marks-input { width: 100%; resize: vertical; box-sizing: border-box; background: var(--panel); color: #fff; border: 1px solid var(--border); border-radius: 5px; padding: 6px 8px; font: 12px/1.4 monospace; }
+.marks-actions { display: flex; gap: 6px; }
+.marks-actions button, .marks-create { background: var(--panel); color: #fff; border: 1px solid var(--border); border-radius: 5px; padding: 7px 10px; cursor: pointer; font-size: 12px; }
+.marks-actions button:first-child { flex: 1; }
+.marks-actions button:disabled, .marks-create:disabled { opacity: .45; cursor: not-allowed; }
+.marks-create { background: var(--accent); border-color: var(--accent); font-weight: 700; }
+.marks-errors { margin: 0; padding: 8px 10px 8px 24px; background: #542525; border-radius: 5px; font-size: 12px; overflow-wrap: anywhere; }
+.marks-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.marks-list li { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12px; }
+.marks-list li strong, .marks-list li small { display: block; }
+.marks-list li small { color: var(--text2); font-size: 11px; }
+.marks-list li .marks-warning { color: #ffb347; }
+.marks-list li button { background: transparent; color: var(--text2); border: 0; cursor: pointer; }
+.marks-list li.marks-empty { color: var(--text2); font-style: italic; border-style: dashed; }
 

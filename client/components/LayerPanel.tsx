@@ -12,6 +12,8 @@ export default function LayerPanel() {
           {sorted.map((layer) => {
             const active = state.activeLayerId === layer.id;
             const locked = editingLayer && !active;
+            const job = state.generations[layer.id];
+            const results = layer.variants?.length ?? 0;
             return (
             <div
               key={layer.id}
@@ -23,7 +25,15 @@ export default function LayerPanel() {
               <div className="layer-thumb">{layer.type === 'perspective' ? '360°' : '2D'}</div>
               <div className="layer-info">
                 <div className="layer-name">{layer.name ?? `Layer ${layer.order}`}</div>
-                <div className="layer-meta">{layer.status ?? 'draft'} · {layer.tileCoords.w}×{layer.tileCoords.h}</div>
+                <div className="layer-meta">
+                  {layer.status ?? 'draft'} · {layer.tileCoords.w}×{layer.tileCoords.h}
+                  {results > 0 && ` · ${results} kết quả`}
+                  {job && (
+                    <span className={`layer-job ${job.status}`} title={job.error}>
+                      {job.status === 'queued' ? '⏳ đang chờ lượt' : job.status === 'running' ? '⏳ đang gen' : '⚠ lỗi'}
+                    </span>
+                  )}
+                </div>
               </div>
               <div className="layer-actions">
                 <button disabled={locked} className={layer.visible === false ? 'hidden' : 'visible'} onClick={(event) => { event.stopPropagation(); state.toggleLayerVisibility(layer.id); }} title="Ẩn/hiện">👁</button>

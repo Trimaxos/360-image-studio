@@ -2,12 +2,14 @@ import type { ViewPose } from './types';
 
 export interface Size { width: number; height: number }
 export interface CropRect extends Size { x: number; y: number }
+/** The ratios of the selection tool (SELECTION_RATIOS), as their primitive integer pair [width, height]. */
+export const PRESET_RATIOS: ReadonlyArray<readonly [number, number]> = [[1, 1], [2, 3], [3, 2], [4, 3], [3, 4], [16, 9], [9, 16],
+  [1, 2], [2, 1], [1, 3], [3, 1]];
+
 /** Round preset ratios as integer multiples of their primitive pair, not a model grid.
  * Non-preset/free selections retain ordinary pixel rounding. */
 export function roundSelectionSize(width: number, height: number, bounds?: Size): Size {
-  const ratios = [[1, 1], [2, 3], [3, 2], [4, 3], [3, 4], [16, 9], [9, 16],
-    [1, 2], [2, 1], [1, 3], [3, 1]];
-  for (const [w, h] of ratios) {
+  for (const [w, h] of PRESET_RATIOS) {
     if (Math.abs(width / height - w / h) > 1e-10) continue;
     const maximum = bounds ? Math.floor(Math.min(bounds.width / w, bounds.height / h)) : Infinity;
     if (maximum < 1) break; // A sub-unit image cannot contain this exact integer ratio.

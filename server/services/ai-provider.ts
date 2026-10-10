@@ -1,6 +1,7 @@
 import { config } from '../config';
 import sharp from 'sharp';
 import { exactModelSize, isValidModelSize } from '../../shared/model-crop';
+import type { AiProviderName } from '../../shared/types';
 
 const PRESERVATION_RULES = [
   'Make one minimal, localized edit to the provided image.',
@@ -198,7 +199,7 @@ export async function resizeRequestInputs(
 }
 
 export interface AiProvider {
-  name: 'fal';
+  name: AiProviderName;
   modelId: string;
   edit(
     image: string,
@@ -326,6 +327,52 @@ class FalProvider implements AiProvider {
   }
 }
 
+// Codex through the local 9router gateway: the OpenAI Responses API with the
+// image_generation tool. There is no mask input, so a drawn region only reaches
+// the model through the prompt (the client blends the result back afterwards).
+const NINEROUTER_ASPECT_TOLERANCE = 0.02;
+
+class NineRouterProvider implements AiProvider {
+  name = 'ninerouter' as const;
+  constructor(public modelId: string, private isRegionEdit?: boolean) {}
+  async edit(base64Image: string, _base64Mask: string, prompt: string) {
+    if (!config.ninerouterKey) throw new Error('NINEROUTER_API_KEY chưa được cấu hình');
+    const sourceImage = Buffer.from(base64Image, 'base64');
+    const editRequest = this.isRegionEdit ? buildRegionEditPrompt(prompt) : buildPreservationPrompt(prompt);
+    const response = await fetch(`${config.ninerouterBaseUrl.replace(/\/+$/, '')}/responses`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${config.ninerouterKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: this.modelId,
+        stream: false,
+        input: [{ role: 'user', content: [
+          { type: 'input_text', text: `${editRequest} Return only the edited image.` },
+          { type: 'input_image', image_url: await toRequestDataUri(base64Image) },
+        ] }],
+        tools: [{ type: 'image_generation' }],
+      }),
+      signal: AbortSignal.timeout(280_000),
+    });
+    if (!response.ok) throw new Error(`9router error: ${response.status} ${(await response.text()).slice(0, 400)}`);
+    const data = await response.json() as any;
+    const output: any[] = data.output ?? [];
+    const generated = output.find((item) => item.type === 'image_generation_call' && item.result);
+    if (!generated) {
+      const text = output.filter((item) => item.type === 'message')
+        .flatMap((item) => item.content ?? []).map((part: any) => part.text).filter(Boolean).join(' ');
+      throw new Error(`9router không trả ảnh${text ? `: ${text.slice(0, 300)}` : ''}`);
+    }
+    const resultBuffer = Buffer.from(generated.result, 'base64');
+    const [source, result] = await Promise.all([sharp(sourceImage).metadata(), sharp(resultBuffer).metadata()]);
+    const drift = Math.abs((result.width! / result.height!) / (source.width! / source.height!) - 1);
+    if (drift > NINEROUTER_ASPECT_TOLERANCE) {
+      throw new Error(`Model trả ảnh sai tỉ lệ: ${result.width}×${result.height}; crop là ${source.width}×${source.height}. Hãy thử lại.`);
+    }
+    const normalized = await normalizeResultToSourceDimensions(sourceImage, resultBuffer);
+    return { base64Result: normalized.toString('base64'), model: this.modelId };
+  }
+}
+
 export function getProviderFor(
   provider: string,
   modelId: string,
@@ -336,6 +383,7 @@ export function getProviderFor(
   isRegionEdit?: boolean,
   supportsCustomImageSize?: boolean,
 ): AiProvider {
+  if (provider === 'ninerouter') return new NineRouterProvider(modelId, isRegionEdit);
   if (provider !== 'fal') throw new Error(`Unsupported AI provider: ${provider}`);
   return new FalProvider(
     modelId, inputProperties, endpointId, extraParams, maskRequired, isRegionEdit, supportsCustomImageSize,
@@ -343,7 +391,7 @@ export function getProviderFor(
 }
 
 export async function aiEdit(
-  providerName: 'fal',
+  providerName: AiProviderName,
   modelId: string,
   base64Image: string,
   base64Mask: string,

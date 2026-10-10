@@ -72,75 +72,6 @@ test('cannot switch to another layer while editing', () => {
   assert.equal(useProjectStore.getState().workflow, 'canvas-edit');
 });
 
-test('selecting Original turns off every generated variant', () => {
-  const layer: Layer = {
-    id: 'layer', order: 1, type: 'flat', visible: true,
-    yaw: 0, pitch: 0, roll: 0, fov: 90,
-    tileCoords: { x: 0, y: 0, w: 10, h: 10 },
-    maskData: [], prompt: '', resultImageId: 'original', status: 'committed',
-    variants: [
-      {
-        id: 'ai', resultImageId: 'generated', source: 'ai-generated', applied: true,
-        width: 10, height: 10, createdAt: 1,
-      },
-    ],
-  };
-  useProjectStore.setState({ layers: [layer], selectedVariantId: 'ai' });
-
-  useProjectStore.getState().selectOriginalVariant('layer');
-
-  assert.equal(useProjectStore.getState().layers[0].variants?.[0].applied, false);
-  assert.equal(useProjectStore.getState().selectedVariantId, null);
-});
-
-test('clicking the selected variant again deselects it and shows Original', () => {
-  const layer: Layer = {
-    id: 'layer', order: 1, type: 'flat', visible: true,
-    yaw: 0, pitch: 0, roll: 0, fov: 90,
-    tileCoords: { x: 0, y: 0, w: 10, h: 10 },
-    maskData: [], prompt: '', resultImageId: 'original', status: 'committed',
-    variants: [
-      {
-        id: 'ai', resultImageId: 'generated', source: 'ai-generated', applied: true,
-        width: 10, height: 10, createdAt: 1,
-      },
-    ],
-  };
-  useProjectStore.setState({ layers: [layer] });
-
-  useProjectStore.getState().selectVariantForEditing('layer', 'ai');
-
-  assert.equal(useProjectStore.getState().layers[0].variants?.[0].applied, false);
-});
-
-test('switching variants never reuses the previous panorama cache', () => {
-  const layer: Layer = {
-    id: 'layer', order: 1, type: 'perspective', visible: true,
-    yaw: 0, pitch: 0, roll: 0, fov: 90,
-    tileCoords: { x: 0, y: 0, w: 10, h: 10 },
-    maskData: [], prompt: '', resultImageId: 'original', status: 'committed',
-    equirectImageId: 'people-panorama',
-    variants: [
-      {
-        id: 'no-people', resultImageId: 'arch-only', source: 'ai-generated', applied: false,
-        width: 10, height: 10, createdAt: 1,
-      },
-      {
-        id: 'people', resultImageId: 'arch-people', source: 'ai-generated', applied: true,
-        equirectImageId: 'people-panorama', width: 10, height: 10, createdAt: 2,
-      },
-    ],
-  };
-  useProjectStore.setState({ layers: [layer] });
-
-  useProjectStore.getState().selectVariantForEditing('layer', 'no-people');
-
-  const updated = useProjectStore.getState().layers[0];
-  assert.equal(updated.equirectImageId, undefined);
-  assert.equal(updated.variants?.find((variant) => variant.id === 'no-people')?.applied, true);
-  assert.equal(updated.variants?.find((variant) => variant.id === 'people')?.applied, false);
-});
-
 test('committing a manual fit replaces the variant image and clears the flag', () => {
   const layer: Layer = {
     id: 'layer', order: 1, type: 'flat', visible: true,
@@ -184,9 +115,8 @@ test('discarding a new layer keeps an applied variant committed for the view', (
   const layerId = useProjectStore.getState().activeLayerId!;
   useProjectStore.getState().addVariantToLayer(layerId, {
     id: 'v1', resultImageId: 'hash1', source: 'ai-generated',
-    applied: false, width: 400, height: 300, createdAt: 1,
+    applied: true, width: 400, height: 300, createdAt: 1,
   });
-  useProjectStore.getState().selectVariantForEditing(layerId, 'v1');
   useProjectStore.getState().setSelectionDraft({
     sourceView: 'flat',
     mode: 'free-select',

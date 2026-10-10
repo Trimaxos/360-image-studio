@@ -84,15 +84,17 @@ export async function updateProjectFile(handle: FileSystemFileHandle, blob: Blob
   }
 }
 
-export async function writeProjectToDirectory(
-  directory: FileSystemDirectoryHandle,
-  name: string,
-  blob: Blob,
-  reservedNames: Set<string> = new Set(),
-): Promise<{ name: string; handle: FileSystemFileHandle }> {
-  const file = await allocateBatchFile(directory, name, '360project', reservedNames);
-  await updateProjectFile(file.handle, blob);
-  return file;
+/** Whether the browser can open files with handles; check before awaiting anything so the click still counts. */
+export function canPickProjectFiles(): boolean {
+  return typeof window !== 'undefined' && typeof window.showOpenFilePicker === 'function';
+}
+
+/** Open .360project files with handles (so Save can write back to them); null when the browser has no such picker. */
+export async function pickProjectFiles(multiple: boolean): Promise<Array<{ file: File; handle: FileSystemFileHandle }> | null> {
+  if (!canPickProjectFiles()) return null;
+  const handles = await window.showOpenFilePicker!({ multiple, id: '360-project',
+    types: [{ description: '360 Image Studio project', accept: { 'application/zip': ['.360project'] } }] });
+  return Promise.all(handles.map(async (handle) => ({ file: await handle.getFile(), handle })));
 }
 
 export async function exportBatchToDirectory(options: {

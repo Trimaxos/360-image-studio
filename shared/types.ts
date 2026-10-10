@@ -164,6 +164,21 @@ export interface ReprojectResponse {
   equirectImageId: string;
 }
 
+export interface ChangesOverlayRequest {
+  imagePath: string;
+  /** Only visible, committed layers with an applied result make it into the picture. */
+  layers: Layer[];
+  /** The overlay is never wider than this (default 4096) and never enlarged. */
+  maxWidth?: number;
+}
+
+export interface ChangesOverlayResponse {
+  /** Cache id of the transparent picture: GET /api/image/cache/:id. */
+  overlayId: string;
+  width: number;
+  height: number;
+}
+
 export interface VariantMaskCacheRequest {
   variantId: string;
   base64Mask: string;
@@ -182,10 +197,12 @@ export interface GeneratedVariant {
   modelId: string;
 }
 
+export type AiProviderName = 'fal' | 'ninerouter';
+
 export interface AiModelOption {
   id: string;
   displayName: string;
-  provider: 'fal';
+  provider: AiProviderName;
   capabilities: Array<'inpainting' | 'image-edit'>;
   enabled: boolean;
   disabledReason?: string;
@@ -212,11 +229,11 @@ export interface AiModelOption {
 
 export interface ModelCatalogResponse {
   groups: Array<{
-    provider: 'fal';
+    provider: AiProviderName;
     label: string;
     models: AiModelOption[];
   }>;
-  errors?: Partial<Record<'fal', string>>;
+  errors?: Partial<Record<AiProviderName, string>>;
 }
 
 export interface MaskShape {
@@ -233,7 +250,7 @@ export interface MaskShape {
 // ===== AI =====
 
 export interface AiEditRequest {
-  provider: 'fal';
+  provider: AiProviderName;
   modelId: string;
   base64Image: string;
   base64Mask?: string;

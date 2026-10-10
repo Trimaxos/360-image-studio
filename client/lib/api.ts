@@ -22,12 +22,6 @@ async function request<T>(method: string, url: string, body?: any): Promise<T> {
 }
 
 export const api = {
-  auth: {
-    status: () => request<{ authenticated: boolean }>('GET', '/auth/status'),
-    login: (username: string, password: string) =>
-      request<{ authenticated: boolean }>('POST', '/auth/login', { username, password }),
-    logout: () => request<{ authenticated: boolean }>('POST', '/auth/logout'),
-  },
   image: {
     open: (path: string) =>
       request<any>('POST', '/image/open', { path }),
@@ -52,6 +46,9 @@ export const api = {
       request<import('../../shared/types').PerspectiveRenderResponse>('POST', '/image/perspective-render', body),
     reproject: (body: import('../../shared/types').ReprojectRequest) =>
       request<import('../../shared/types').ReprojectResponse>('POST', '/image/reproject', body),
+    // One transparent picture of every applied layer (the Flat View's "Xem thay đổi"), built and cached by the server
+    changesOverlay: (body: import('../../shared/types').ChangesOverlayRequest) =>
+      request<import('../../shared/types').ChangesOverlayResponse>('POST', '/image/changes-overlay', body),
     cacheUrl: (id: string) =>
       `${BASE}/image/cache/${encodeURIComponent(id)}`,
     // Upload image file from browser — returns { path, width, height, originalName }
@@ -88,6 +85,9 @@ export const api = {
       }
       return res.blob();
     },
+    // Save into the server's projects folder without a file dialog (automation, ?auto=1) — never overwrites a file
+    saveToFolder: (project: import('../../shared/types').ProjectFile, name: string) =>
+      request<{ path: string; name: string }>('POST', '/project/save-to-folder', { project, name }),
     // Upload .360project (ZIP v3 or JSON v2) — auto-detected by server
     uploadZip: async (file: File): Promise<{ project: any }> => {
       const formData = new FormData();

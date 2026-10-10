@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyFalModel } from './model-catalog';
+import { classifyFalModel, ninerouterOptions } from './model-catalog';
+import { config } from './config';
 
 test('fal image edit and inpainting models remain in catalog', () => {
   const item = classifyFalModel({
@@ -96,3 +97,18 @@ test('text to image model is omitted', () => {
   assert.equal(item, null);
 });
 
+
+test('9router Codex model is only offered when a key is configured', (t) => {
+  const old = config.ninerouterKey;
+  t.after(() => { config.ninerouterKey = old; });
+  config.ninerouterKey = '';
+  assert.deepEqual(ninerouterOptions(), []);
+  config.ninerouterKey = 'nr-key';
+  const [model] = ninerouterOptions();
+  assert.equal(model.id, 'cx/gpt-6-astra');
+  assert.equal(model.provider, 'ninerouter');
+  assert.equal(model.enabled, true);
+  assert.equal(model.hasMask, false);
+  assert.equal(model.supportsReferenceImages, false);
+  assert.ok(model.capabilities.includes('image-edit'));
+});

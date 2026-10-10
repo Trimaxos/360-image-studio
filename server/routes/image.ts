@@ -4,9 +4,9 @@ import path from 'path';
 import fs from 'fs/promises';
 import multer from 'multer';
 import sharp from 'sharp';
-import { openImage, getTile, serveImage, exportImage, applyVisibilityMask, CACHE_DIR } from '../services/image-processor';
+import { openImage, getTile, serveImage, canServeOriginal, exportImage, buildChangesOverlay, applyVisibilityMask, CACHE_DIR } from '../services/image-processor';
 import { renderPerspective, reprojectToEquirectangular } from '../services/perspective-projector';
-import type { ImageOpenRequest, ImageOpenResponse, ExportRequest, PerspectiveRenderRequest, ReprojectRequest } from '../../shared/types';
+import type { ChangesOverlayRequest, ChangesOverlayResponse, ImageOpenRequest, ImageOpenResponse, ExportRequest, PerspectiveRenderRequest, ReprojectRequest } from '../../shared/types';
 
 export const imageRouter = Router();
 
@@ -37,11 +37,19 @@ imageRouter.post('/open', async (req, res) => {
 // Serve ảnh gốc (đã resize) cho PSV viewer — giữ tỉ lệ 2:1
 imageRouter.get('/serve', async (req, res) => {
   try {
-    const { path, maxWidth } = req.query;
-    if (!path) return res.status(400).json({ error: 'path is required' });
-    const result = await serveImage(String(path), maxWidth ? Number(maxWidth) : undefined);
+    const { path: file, maxWidth } = req.query;
+    if (!file) return res.status(400).json({ error: 'path is required' });
+    // Without maxWidth the viewer gets the original bytes: no PNG re-encode of a 10000x5000 panorama.
+    // dotfiles: uploads live under ~/.cache, which sendFile refuses by default.
+    if (!maxWidth && await canServeOriginal(String(file))) {
+      return await new Promise<void>((resolve, reject) => {
+        res.sendFile(path.resolve(String(file)), { dotfiles: 'allow' }, (error) => (error ? reject(error) : resolve()));
+      });
+    }
+    const result = await serveImage(String(file), maxWidth ? Number(maxWidth) : undefined);
     res.type('image/png').send(result.buffer);
   } catch (err: any) {
+    if (res.headersSent) return;
     res.status(500).json({ error: err.message });
   }
 });
@@ -215,6 +223,22 @@ imageRouter.post('/reproject', async (req, res) => {
     await fs.writeFile(reprojectionIndex, hash, 'utf8');
 
     res.json({ equirectImageId: hash });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// One transparent picture of every applied layer for the Flat View's "Xem thay đổi" (cached by its content)
+imageRouter.post('/changes-overlay', async (req, res) => {
+  try {
+    const { imagePath, layers, maxWidth } = req.body as Partial<ChangesOverlayRequest>;
+    if (!imagePath?.trim()) return res.status(400).json({ error: 'imagePath is required' });
+    const overlay = await buildChangesOverlay(
+      imagePath,
+      Array.isArray(layers) ? layers : [],
+      typeof maxWidth === 'number' && maxWidth > 0 ? maxWidth : undefined,
+    );
+    res.json({ overlayId: overlay.id, width: overlay.width, height: overlay.height } satisfies ChangesOverlayResponse);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
