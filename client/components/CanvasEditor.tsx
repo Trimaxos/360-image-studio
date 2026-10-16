@@ -9,6 +9,7 @@ import {
 import { useProjectStore } from '../stores/project';
 import { applyVariantToPanorama } from '../lib/apply-variant';
 import { composeVariantPreview } from '../lib/visibility-mask';
+import GridTilesDialog from './GridTilesDialog';
 import RegionSelectOverlay from './RegionSelectOverlay';
 import VariantGallery from './VariantGallery';
 import type { LayerVariant } from '../../shared/types';
@@ -22,6 +23,8 @@ export default function CanvasEditor() {
   const [sourceError, setSourceError] = useState('');
   const [exchangeMessage, setExchangeMessage] = useState('');
   const [selectingRegion, setSelectingRegion] = useState(false);
+  // The picture the Tiles dialog works on (what the canvas shows); null while the dialog is closed.
+  const [gridSourceUrl, setGridSourceUrl] = useState<string | null>(null);
   const [imageTransform, setImageTransform] = useState<{ left: number; top: number; scale: number } | null>(null);
   const selectedVariant = useMemo(
     () => state.generatedVariants.find((item) => item.id === state.selectedVariantId),
@@ -144,11 +147,25 @@ export default function CanvasEditor() {
     state.leaveCanvas('keep');
   };
 
-  const getSourceBlob = async () => {
-    if (!sourceUrl) throw new Error('Chưa có ảnh canvas để xuất.');
-    const response = await fetch(sourceUrl);
+  const fetchImageBlob = async (url: string) => {
+    if (!url) throw new Error('Chưa có ảnh canvas để xuất.');
+    const response = await fetch(url);
     if (!response.ok) throw new Error('Không đọc được ảnh canvas.');
     return response.blob();
+  };
+  const getSourceBlob = () => fetchImageBlob(sourceUrl);
+
+  // Same picture the canvas shows: a refined result (visibility mask) is composed over the original first.
+  const openGrid = async () => {
+    setExchangeMessage('');
+    try {
+      const maskBase64 = reviewVariant?.visibilityMask?.base64Mask;
+      setGridSourceUrl(maskBase64 && originalSourceUrl
+        ? await composeVariantPreview(originalSourceUrl, sourceUrl, maskBase64)
+        : sourceUrl);
+    } catch (reason) {
+      setExchangeMessage(reason instanceof Error ? reason.message : 'Không thể mở Tiles.');
+    }
   };
 
   const downloadCanvas = async () => {
@@ -293,6 +310,27 @@ export default function CanvasEditor() {
     }
   };
 
+  // Stitches the tiles the user brought back into a NEW result; the one being looked at is never overwritten.
+  // Errors propagate so the dialog can show them and stay open.
+  const confirmGridTiles = async (base64: string, filled: number, total: number) => {
+    if (!activeLayer) return;
+    const layerId = activeLayer.id;
+    const { w, h } = activeLayer.tileCoords;
+    const { resultImageId } = await api.image.saveResultCache(base64);
+    const variant: LayerVariant = {
+      id: crypto.randomUUID(),
+      resultImageId,
+      source: 'imported',
+      applied: false,
+      width: w,
+      height: h,
+      createdAt: Date.now(),
+    };
+    state.addVariantToLayer(layerId, variant);
+    state.setReviewVariant(variant.id);
+    setExchangeMessage(`Đã ghép ${filled}/${total} tile thành kết quả mới.`);
+  };
+
   return (
     <div className="canvas-editor">
       <input
@@ -333,6 +371,13 @@ export default function CanvasEditor() {
           <button disabled={sourceStatus !== 'ready'} onClick={() => void downloadCanvas()}>Download Image</button>
           <button disabled={sourceStatus !== 'ready'} onClick={() => void copyCanvas()}>Copy Image</button>
           <button disabled={sourceStatus !== 'ready'} onClick={() => void sendToGpt()} title="Tải crop + copy prompt chuẩn để dán sang ChatGPT">Gửi sang GPT</button>
+          <button
+            disabled={!activeLayer || applying || sourceStatus !== 'ready' || !!reviewVariant?.needsFit}
+            onClick={() => void openGrid()}
+            title="Chia ảnh đang xem thành lưới tile để làm nét qua ChatGPT rồi ghép lại thành bản mới"
+          >
+            ⊞ Tiles (nâng cao)
+          </button>
           <button disabled={sourceStatus !== 'ready'} onClick={() => resultInputRef.current?.click()}>Import Result</button>
         </div>
       </div>
@@ -371,6 +416,16 @@ export default function CanvasEditor() {
           />
         )}
       </div>
+      {gridSourceUrl !== null && activeLayer && (
+        <GridTilesDialog
+          sourceUrl={gridSourceUrl}
+          getSourceBlob={() => fetchImageBlob(gridSourceUrl)}
+          width={activeLayer.tileCoords.w}
+          height={activeLayer.tileCoords.h}
+          onConfirm={confirmGridTiles}
+          onClose={() => setGridSourceUrl(null)}
+        />
+      )}
       {exchangeMessage && <div className="canvas-exchange-message">{exchangeMessage}</div>}
       <VariantGallery />
     </div>

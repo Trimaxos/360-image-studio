@@ -837,6 +837,87 @@ html, body, #root {
   width: 92px;
 }
 
+/* ===== Grid Tiles Dialog ===== */
+.grid-tiles-dialog {
+  width: 100%;
+  max-width: min(92vw, 960px);
+  max-height: 92vh;
+  overflow-y: auto;
+}
+.grid-tiles-dialog textarea {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  resize: vertical;
+}
+.grid-tiles-copy {
+  margin: 8px 0;
+}
+.grid-tiles-board {
+  position: relative;
+  margin: 0 auto;
+  overflow: hidden;
+  background: #000;
+}
+.grid-tiles-board img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  user-select: none;
+}
+.grid-tiles-cell {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px dashed rgba(255,255,255,.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.grid-tiles-cell.filled {
+  border-style: solid;
+}
+.grid-tiles-cell.over {
+  background: rgba(233,69,96,.35);
+  border-color: var(--accent);
+}
+/* Children ignore the pointer so the drag highlight does not flicker as the cursor crosses them. */
+.grid-tiles-cell > * {
+  pointer-events: none;
+}
+.grid-tiles-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: #fff;
+  font-size: 22px;
+  text-shadow: 0 1px 3px rgba(0,0,0,.8);
+}
+.grid-tiles-empty b {
+  font-size: 14px;
+}
+.grid-tiles-cell > .grid-tiles-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  pointer-events: auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0,0,0,.7);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
 /* ===== Lock Edit Bar ===== */
 .edit-lock-bar {
   display: flex;

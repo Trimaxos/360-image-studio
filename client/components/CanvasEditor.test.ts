@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { act, createElement } from 'react';
 import type { Layer, LayerVariant } from '../../shared/types';
-import { stubCanvas2d } from '../test-utils/canvas-stub';
+import { installFakeImage, stubCanvas2d } from '../test-utils/canvas-stub';
 import { setupDom } from '../test-utils/dom';
 
 async function importUnsafe(specifier: string): Promise<any> { return import(specifier); }
@@ -19,12 +19,15 @@ function deferred<T = any>() {
 }
 
 /** The editor open on a 360 layer with the given results, looking at `review`. */
-async function mountEditor(t: any, variants: LayerVariant[], review: string | null, layerPatch: Partial<Layer> = {}) {
+async function mountEditor(t: any, variants: LayerVariant[], review: string | null, layerPatch: Partial<Layer> = {}, prepare?: () => void) {
   const { JSDOM } = await importUnsafe('jsdom');
   const dom = new JSDOM('<!doctype html><html><body></body></html>', { pretendToBeVisual: true });
   setupDom(dom);
   stubCanvas2d(dom); // the picture on the canvas is not what these tests are about
   (globalThis as any).fetch = async () => { throw new Error('no network in this test'); };
+  // fabric caches the first window it sees; point it at this test's window so its render frames do not outlive it
+  const fabric = await importUnsafe('fabric');
+  fabric.setEnv({ ...fabric.getEnv(), window: dom.window, document: dom.window.document });
   const { createRoot } = await importUnsafe('react-dom/client');
   const { useProjectStore } = await importUnsafe('../stores/project');
   const { api } = await importUnsafe('../lib/api');
@@ -44,6 +47,7 @@ async function mountEditor(t: any, variants: LayerVariant[], review: string | nu
   useProjectStore.getState().openLayerEditor(layerId);
   useProjectStore.setState({ reviewVariantId: review });
 
+  prepare?.();
   const container = dom.window.document.createElement('div');
   dom.window.document.body.appendChild(container);
   const root = createRoot(container);
@@ -51,7 +55,8 @@ async function mountEditor(t: any, variants: LayerVariant[], review: string | nu
   const applyButton = () => container.querySelector('button.canvas-apply-btn') as HTMLButtonElement;
   const backButton = () => Array.from(container.querySelectorAll('button')).find((button: any) => /Back to View/.test(button.textContent)) as HTMLButtonElement;
   const settle = async () => { for (let i = 0; i < 6; i += 1) await act(async () => { await new Promise((resolve) => setImmediate(resolve)); }); };
-  const close = async () => { await act(async () => root.unmount()); dom.window.close(); };
+  // fabric's canvas may have a render frame pending; let it fire before the window it belongs to is closed
+  const close = async () => { await act(async () => root.unmount()); await new Promise((resolve) => setTimeout(resolve, 50)); dom.window.close(); };
   return { store: useProjectStore, container, layerId, reproject, reprojectMock, applyButton, backButton, settle, close };
 }
 
@@ -153,6 +158,74 @@ test('Back only hides the editor: no question, nothing applied, the generation o
     assert.deepEqual(layer.variants?.map((item: LayerVariant) => [item.id, item.applied]), [['a', false], ['b', false], ['c', false]], 'the new result is not lost');
     assert.equal(layer.prompt, 'edited prompt');
   } finally {
+    await close();
+  }
+});
+
+test('Tiles stitches the dropped tiles into a new imported result without touching the existing ones', async (t) => {
+  const { FabricImage } = await importUnsafe('fabric');
+  // the picture on the canvas is not under test, only that it counts as loaded
+  t.mock.method(FabricImage, 'fromURL', async () => new FabricImage(document.createElement('img'), { width: 100, height: 80 }));
+  const { store, container, layerId, settle, close } = await mountEditor(t, [variant('a')], 'a');
+  const { api } = await importUnsafe('../lib/api');
+  const saveMock = t.mock.method(api.image, 'saveResultCache', async () => ({ resultImageId: 'stitched' }));
+  const g = globalThis as any;
+  const previous = { fetch: g.fetch, createImageBitmap: g.createImageBitmap, createObjectURL: URL.createObjectURL, revokeObjectURL: URL.revokeObjectURL };
+  g.fetch = async () => ({ ok: true, blob: async () => new Blob(['x'], { type: 'image/png' }) });
+  g.createImageBitmap = async () => ({ width: 10, height: 10, close() {} });
+  URL.createObjectURL = () => 'blob:tile';
+  URL.revokeObjectURL = () => {};
+  try {
+    await settle();
+    const buttonByText = (pattern: RegExp) => Array.from(container.querySelectorAll('button')).find((button: any) => pattern.test(button.textContent)) as HTMLButtonElement;
+    await act(async () => buttonByText(/Tiles/).click());
+    const win = container.ownerDocument.defaultView!;
+    const event = new win.Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'dataTransfer', { value: { files: [new win.File(['x'], 'tile.png', { type: 'image/png' })] } });
+    await act(async () => { container.querySelector('.grid-tiles-cell')!.dispatchEvent(event); });
+    await act(async () => buttonByText(/Xác nhận/).click());
+    await settle();
+
+    assert.equal(saveMock.mock.callCount(), 1);
+    assert.equal(container.querySelector('.grid-tiles-dialog'), null, 'the dialog closes once the new result exists');
+    const layer = store.getState().layers.find((item: Layer) => item.id === layerId)!;
+    assert.equal(layer.variants!.length, 2);
+    assert.deepEqual(layer.variants![0], variant('a'));
+    const added = layer.variants![1];
+    assert.deepEqual([added.source, added.resultImageId, added.applied, added.width, added.height], ['imported', 'stitched', false, 100, 80]);
+    assert.equal(store.getState().reviewVariantId, added.id);
+    assert.match(container.querySelector('.canvas-exchange-message')!.textContent!, /Đã ghép 1\/6 tile/);
+  } finally {
+    Object.assign(g, { fetch: previous.fetch, createImageBitmap: previous.createImageBitmap });
+    URL.createObjectURL = previous.createObjectURL;
+    URL.revokeObjectURL = previous.revokeObjectURL;
+    await close();
+  }
+});
+
+test('Tiles works on the refined picture the canvas shows when the result has a visibility mask', async (t) => {
+  const { FabricImage } = await importUnsafe('fabric');
+  t.mock.method(FabricImage, 'fromURL', async () => new FabricImage(document.createElement('img'), { width: 100, height: 80 }));
+  const g = globalThis as any;
+  const previous = { fetch: g.fetch, image: g.Image };
+  const { container, settle, close } = await mountEditor(
+    t, [variant('a', { visibilityMask: { base64Mask: 'bWFzaw==', brushSize: 10, brushSoftness: 0 } })], 'a', {},
+    () => installFakeImage(g, () => ({ width: 100, height: 80 })),
+  );
+  const fetched: string[] = [];
+  g.fetch = async (url: string) => { fetched.push(url); return { ok: true, blob: async () => new Blob(['x'], { type: 'image/png' }) }; };
+  try {
+    await settle();
+    const buttonByText = (pattern: RegExp) => Array.from(container.querySelectorAll('button')).find((button: any) => pattern.test(button.textContent)) as HTMLButtonElement;
+    await act(async () => buttonByText(/Tiles/).click());
+    await settle();
+
+    // the composed preview (stubbed toDataURL), not the raw result in the cache
+    assert.equal(container.querySelector('.grid-tiles-board > img')!.getAttribute('src'), 'data:image/png;base64,c3R1Yg==');
+    await act(async () => buttonByText(/Copy ảnh/).click());
+    assert.deepEqual(fetched, ['data:image/png;base64,c3R1Yg==']);
+  } finally {
+    Object.assign(g, { fetch: previous.fetch, Image: previous.image });
     await close();
   }
 });

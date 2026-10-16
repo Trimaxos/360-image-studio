@@ -1,3 +1,5 @@
+import type { GridCell } from '../../shared/grid-tiles';
+
 interface Size {
   width: number;
   height: number;
@@ -35,6 +37,39 @@ export async function blobToPngBase64(blob: Blob, target: Size): Promise<string>
   } finally {
     bitmap.close();
   }
+}
+
+// Bitmaps are decoded and closed one at a time so a 12-tile grid never holds 12 full-size images in memory.
+export async function composeGridTiles(
+  source: Blob,
+  width: number,
+  height: number,
+  cells: GridCell[],
+  tiles: Array<Blob | null>,
+): Promise<string> {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Trình duyệt không hỗ trợ canvas 2D.');
+  context.imageSmoothingQuality = 'high';
+  const sourceBitmap = await createImageBitmap(source);
+  try {
+    context.drawImage(sourceBitmap, 0, 0, width, height);
+  } finally {
+    sourceBitmap.close();
+  }
+  for (let i = 0; i < cells.length; i += 1) {
+    const tile = tiles[i];
+    if (!tile) continue;
+    const bitmap = await createImageBitmap(tile);
+    try {
+      context.drawImage(bitmap, cells[i].x, cells[i].y, cells[i].w, cells[i].h);
+    } finally {
+      bitmap.close();
+    }
+  }
+  return canvas.toDataURL('image/png').split(',')[1];
 }
 
 export function downloadBlob(blob: Blob, filename: string): void {

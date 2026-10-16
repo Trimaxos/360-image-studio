@@ -9,7 +9,7 @@ export function stubCanvas2d(dom: any) {
         globalCompositeOperation: 'source-over',
         clearRect() {}, fillRect() {}, drawImage() {}, beginPath() {}, arc() {},
         fill() {}, save() {}, restore() {}, strokeRect() {}, setLineDash() {},
-        moveTo() {}, lineTo() {}, stroke() {},
+        moveTo() {}, lineTo() {}, stroke() {}, scale() {}, closePath() {}, transform() {},
         createRadialGradient: () => ({ addColorStop() {} }),
         getImageData: (_x: number, _y: number, width: number, height: number) => ({
           data: new Uint8ClampedArray(Math.max(4, width * height * 4)),
