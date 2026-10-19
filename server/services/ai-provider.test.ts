@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   addFalImageInputs, buildPreservationPrompt, fitModelOutputImageSize, getProviderFor,
-  normalizeResultToSourceDimensions, resizeRequestInputs,
+  normalizeResultToSourceDimensions, pickGptImageSize, resizeRequestInputs,
 } from './ai-provider';
 import sharp from 'sharp';
 import { config } from '../config';
@@ -292,4 +292,76 @@ test('ninerouter provider requires an API key and reports gateway errors', async
   config.ninerouterKey = 'nr-key';
   t.mock.method(globalThis, 'fetch', async () => new Response('quota exceeded', { status: 429 }));
   await assert.rejects(provider.edit(source.toString('base64'), '', 'edit'), /429.*quota exceeded/);
+});
+
+test('gpt-image size follows the crop aspect ratio', () => {
+  assert.deepEqual(pickGptImageSize(1200, 800), { width: 1536, height: 1024 });
+  assert.deepEqual(pickGptImageSize(800, 1200), { width: 1024, height: 1536 });
+  assert.deepEqual(pickGptImageSize(1000, 1000), { width: 1024, height: 1024 });
+  assert.deepEqual(pickGptImageSize(1100, 1000), { width: 1024, height: 1024 });
+  assert.deepEqual(pickGptImageSize(3000, 1000), { width: 1536, height: 1024 });
+});
+
+test('ninerouter gpt-image model edits through /images/generations at a standard size', async (t) => {
+  const old = { key: config.ninerouterKey, url: config.ninerouterBaseUrl };
+  config.ninerouterKey = 'nr-key';
+  config.ninerouterBaseUrl = 'http://gateway.invalid/v1/';
+  t.after(() => { config.ninerouterKey = old.key; config.ninerouterBaseUrl = old.url; });
+  const source = await solidPng(1200, 800);
+  const generated = await solidPng(1536, 1024);
+  const calls: Array<{ url: string; headers: Record<string, string>; body: any }> = [];
+  t.mock.method(globalThis, 'fetch', async (url: unknown, options?: RequestInit) => {
+    calls.push({ url: String(url), headers: options?.headers as Record<string, string>, body: JSON.parse(options?.body as string) });
+    return Response.json({ data: [{ b64_json: generated.toString('base64') }] });
+  });
+  const provider = getProviderFor('ninerouter', 'cx/gpt-image-2.5-flare', undefined, undefined, { quality: 'high' });
+  const result = await provider.edit(source.toString('base64'), '', 'add a car');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'http://gateway.invalid/v1/images/generations');
+  assert.equal(calls[0].headers.Authorization, 'Bearer nr-key');
+  const { body } = calls[0];
+  assert.equal(body.model, 'cx/gpt-image-2.5-flare');
+  assert.equal(body.quality, 'high');
+  assert.equal(body.size, '1536x1024');
+  assert.equal(body.output_format, 'png');
+  assert.equal(body.n, 1);
+  assert.match(body.prompt, /EDIT REQUEST: add a car/);
+  assert.match(body.image, /^data:image\/png;base64,/);
+  const sent = await sharp(Buffer.from(body.image.split(',')[1], 'base64')).metadata();
+  assert.equal(sent.width, 1536);
+  assert.equal(sent.height, 1024);
+  const meta = await sharp(Buffer.from(result.base64Result, 'base64')).metadata();
+  assert.equal(meta.width, 1200);
+  assert.equal(meta.height, 800);
+  assert.equal(result.model, 'cx/gpt-image-2.5-flare');
+});
+
+test('ninerouter gpt-image model defaults to high quality without extraParams', async (t) => {
+  const old = config.ninerouterKey;
+  config.ninerouterKey = 'nr-key';
+  t.after(() => { config.ninerouterKey = old; });
+  const source = await solidPng(400, 400);
+  const generated = await solidPng(1024, 1024);
+  let quality: unknown;
+  t.mock.method(globalThis, 'fetch', async (_url: unknown, options?: RequestInit) => {
+    quality = JSON.parse(options?.body as string).quality;
+    return Response.json({ data: [{ b64_json: generated.toString('base64') }] });
+  });
+  await getProviderFor('ninerouter', 'cx/gpt-image-2.5-flare').edit(source.toString('base64'), '', 'edit');
+  assert.equal(quality, 'high');
+});
+
+test('ninerouter gpt-image model fails when no image or a wrong size comes back', async (t) => {
+  const old = config.ninerouterKey;
+  config.ninerouterKey = 'nr-key';
+  t.after(() => { config.ninerouterKey = old; });
+  const source = await solidPng(1200, 800);
+  const provider = getProviderFor('ninerouter', 'cx/gpt-image-2.5-flare');
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ data: [{}] }));
+  await assert.rejects(provider.edit(source.toString('base64'), '', 'edit'), /9router không trả ảnh/);
+  const wrong = await solidPng(1024, 1024);
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ data: [{ b64_json: wrong.toString('base64') }] }));
+  await assert.rejects(provider.edit(source.toString('base64'), '', 'edit'), /sai kích thước.*1024×1024.*1536×1024/);
+  t.mock.method(globalThis, 'fetch', async () => new Response('boom', { status: 500 }));
+  await assert.rejects(provider.edit(source.toString('base64'), '', 'edit'), /9router error: 500 boom/);
 });

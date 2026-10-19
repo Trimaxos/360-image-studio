@@ -20,19 +20,7 @@ interface CuratedModel {
 }
 
 const CURATED_FAL_MODELS: CuratedModel[] = [
-  { id: 'fal-ai/flux-2/klein/9b/edit', price: '$0.022' },
-  { id: 'fal-ai/flux-2-pro/edit', price: '~$0.045' },
-  { id: 'bytedance/seedream/v5/lite/edit', price: '$0.035/ảnh', name: 'Seedream V5 Lite Edit' },
-  { id: 'bytedance/seedream/v5/pro/edit', price: '~$0.068/ảnh', name: 'Seedream V5 Pro Edit' },
-  { id: 'fal-ai/nano-banana-2/edit', price: '$0.080/ảnh', name: 'Nano Banana 2 Edit' },
-  { id: 'fal-ai/nano-banana/edit', price: '$0.039/ảnh', name: 'Nano Banana Edit' },
-  { id: 'fal-ai/flux-pro/kontext', price: '$0.040/ảnh' },
-  { id: 'fal-ai/flux-2/edit', price: '$0.024' },
-  { id: 'fal-ai/bytedance/seedream/v4.5/edit', price: '$0.040/ảnh' },
-  { id: 'fal-ai/flux-2/turbo/edit', price: '$0.016' },
-  { id: 'fal-ai/flux-2-max/edit', price: '~$0.10' },
-  { id: 'openai/gpt-image-2.5/flare/edit', price: '' },
-  { id: 'openai/gpt-image-2.5/sunburst/edit', price: '', name: 'GPT Image 2.5 Sunburst Edit' },
+  { id: 'openai/gpt-image-2.5/flare/edit', price: '', name: 'GPT Image 2.5 Flare Edit' },
 ];
 
 // Some endpoints expose a "quality" tier that changes both price and result
@@ -47,15 +35,11 @@ interface ModelVariant {
 }
 
 const GPT_IMAGE_25_QUALITY_VARIANTS: ModelVariant[] = [
-  { suffix: 'low', label: 'Low', price: '~$0.006/ảnh', extraParams: { quality: 'low' } },
   { suffix: 'medium', label: 'Medium', price: '~$0.013/ảnh', extraParams: { quality: 'medium' } },
-  { suffix: 'high', label: 'High', price: '~$0.053/ảnh', extraParams: { quality: 'high' } },
-  { suffix: 'xhigh', label: 'XHigh', price: '~$0.094/ảnh', extraParams: { quality: 'xhigh' } },
 ];
 
 const MODEL_VARIANTS: Record<string, ModelVariant[]> = {
   'openai/gpt-image-2.5/flare/edit': GPT_IMAGE_25_QUALITY_VARIANTS,
-  'openai/gpt-image-2.5/sunburst/edit': GPT_IMAGE_25_QUALITY_VARIANTS,
 };
 
 // Endpoints validated to honor an explicit { width, height } `image_size`.
@@ -65,7 +49,6 @@ const MODEL_VARIANTS: Record<string, ModelVariant[]> = {
 // shape but are not enabled here to avoid changing their behavior and cost.
 const CUSTOM_IMAGE_SIZE_ENDPOINTS = new Set([
   'openai/gpt-image-2.5/flare/edit',
-  'openai/gpt-image-2.5/sunburst/edit',
 ]);
 
 // ===== Schema helpers =====
@@ -223,11 +206,23 @@ async function falOptions(): Promise<AiModelOption[]> {
 
 // ===== 9router (Codex via ChatGPT account) =====
 
-// Only cx/gpt-6-astra returns an image through the Responses image_generation
-// tool; the other cx/* models answer "no image-editing tool is available".
+// cx/gpt-image-* edits through the Images API (/images/generations); cx/gpt-6-astra
+// returns an image through the Responses image_generation tool, and the other
+// cx/* models answer "no image-editing tool is available". Neither is listed
+// by /models, so they are declared here.
 export function ninerouterOptions(): AiModelOption[] {
   if (!config.ninerouterKey) return [];
   return [{
+    id: 'cx/gpt-image-2.5-flare',
+    displayName: 'GPT Image 2.5 Flare (High) — 9router',
+    provider: 'ninerouter',
+    capabilities: ['image-edit'],
+    enabled: true,
+    hasMask: false,
+    maskRequired: false,
+    supportsReferenceImages: false,
+    extraParams: { quality: 'high' },
+  }, {
     id: 'cx/gpt-6-astra',
     displayName: 'GPT-6 Astra (Codex qua 9router — hạn mức ChatGPT)',
     provider: 'ninerouter',
@@ -258,8 +253,11 @@ export async function getModelCatalog(): Promise<ModelCatalogResponse> {
   } catch (error) {
     errors.fal = error instanceof Error ? error.message : 'Không tải được fal.ai catalog';
   }
-  const groups: ModelCatalogResponse['groups'] = [{ provider: 'fal', label: 'fal.ai', models: fal }];
   const ninerouter = ninerouterOptions();
-  if (ninerouter.length) groups.push({ provider: 'ninerouter', label: '9router', models: ninerouter });
+  // 9router first: the model selector defaults to the first enabled model.
+  const groups: ModelCatalogResponse['groups'] = [
+    ...(ninerouter.length ? [{ provider: 'ninerouter' as const, label: '9router', models: ninerouter }] : []),
+    { provider: 'fal', label: 'fal.ai', models: fal },
+  ];
   return { groups, errors };
 }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyFalModel, ninerouterOptions } from './model-catalog';
+import { classifyFalModel, getModelCatalog, ninerouterOptions } from './model-catalog';
 import { config } from './config';
 
 test('fal image edit and inpainting models remain in catalog', () => {
@@ -98,17 +98,38 @@ test('text to image model is omitted', () => {
 });
 
 
-test('9router Codex model is only offered when a key is configured', (t) => {
+test('9router models are only offered when a key is configured, Flare first', (t) => {
   const old = config.ninerouterKey;
   t.after(() => { config.ninerouterKey = old; });
   config.ninerouterKey = '';
   assert.deepEqual(ninerouterOptions(), []);
   config.ninerouterKey = 'nr-key';
-  const [model] = ninerouterOptions();
-  assert.equal(model.id, 'cx/gpt-6-astra');
-  assert.equal(model.provider, 'ninerouter');
-  assert.equal(model.enabled, true);
-  assert.equal(model.hasMask, false);
-  assert.equal(model.supportsReferenceImages, false);
-  assert.ok(model.capabilities.includes('image-edit'));
+  const models = ninerouterOptions();
+  assert.deepEqual(models.map((m) => m.id), ['cx/gpt-image-2.5-flare', 'cx/gpt-6-astra']);
+  const [flare] = models;
+  assert.equal(flare.extraParams?.quality, 'high');
+  for (const model of models) {
+    assert.equal(model.provider, 'ninerouter');
+    assert.equal(model.enabled, true);
+    assert.equal(model.hasMask, false);
+    assert.equal(model.supportsReferenceImages, false);
+    assert.ok(model.capabilities.includes('image-edit'));
+  }
+});
+
+test('catalog lists 9router before fal and fal only offers Flare Medium', async (t) => {
+  const old = config.ninerouterKey;
+  t.after(() => { config.ninerouterKey = old; });
+  config.ninerouterKey = 'nr-key';
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ models: [{
+    endpoint_id: 'openai/gpt-image-2.5/flare/edit',
+    metadata: { display_name: 'GPT Image 2.5 Flare Edit', categories: ['image-to-image'] },
+    ...editSchemaWithImageSize({ type: 'string', enum: ['auto'] }),
+  }] }));
+  const { groups } = await getModelCatalog();
+  assert.equal(groups[0].provider, 'ninerouter');
+  const fal = groups.find((group) => group.provider === 'fal');
+  assert.deepEqual(fal?.models.map((m) => m.id), ['openai/gpt-image-2.5/flare/edit::medium']);
+  assert.equal(fal?.models[0].endpointId, 'openai/gpt-image-2.5/flare/edit');
+  assert.equal(fal?.models[0].extraParams?.quality, 'medium');
 });

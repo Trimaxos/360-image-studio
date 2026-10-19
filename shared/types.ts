@@ -219,7 +219,7 @@ export interface AiModelOption {
   supportsReferenceImages?: boolean;
   /** Real fal.ai endpoint to call, when it differs from `id` (e.g. multiple quality-tier options sharing one endpoint) */
   endpointId?: string;
-  /** Extra body params merged into the fal.ai request (e.g. { quality: 'low' }) */
+  /** Extra request params for the provider (e.g. { quality: 'medium' }); fal merges them into the body, 9router reads `quality` */
   extraParams?: Record<string, string | number | boolean>;
   /** Whether the endpoint accepts an explicit `image_size` of { width, height }.
    *  When set, the server requests the crop's own size (capped to the model's
