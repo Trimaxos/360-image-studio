@@ -265,18 +265,12 @@ export default function CanvasEditor() {
       // Tải crop hiện tại về máy
       const sourceBlob = await getSourceBlob();
       downloadBlob(sourceBlob, `crop-${tile?.w ?? 0}x${tile?.h ?? 0}.png`);
-      // Copy prompt chuẩn (dịch EN nếu được) + yêu cầu kích thước
-      let english = rawPrompt;
-      if (rawPrompt) {
-        try {
-          english = (await api.ai.translate(rawPrompt)).translated;
-        } catch { /* giữ prompt gốc khi không dịch được */ }
-      }
+      // Copy prompt chuẩn + yêu cầu kích thước
       const sizeNote = tile
         ? `Output image MUST be exactly ${tile.w}x${tile.h} pixels (aspect ratio ${tile.w}:${tile.h}). Return only the edited image.`
         : 'Return only the edited image.';
       const editNote = 'Make a minimal localized edit. Preserve exact framing, composition, colors, lighting and details. Change only what the request asks.';
-      const fullPrompt = [english || '(describe your edit here)', editNote, sizeNote].join('\n\n');
+      const fullPrompt = [rawPrompt || '(describe your edit here)', editNote, sizeNote].join('\n\n');
       await navigator.clipboard.writeText(fullPrompt);
       setExchangeMessage('Đã tải crop + copy prompt — dán cả 2 vào ChatGPT rồi Import kết quả về.');
     } catch (reason) {

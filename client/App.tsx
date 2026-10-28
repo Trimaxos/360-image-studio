@@ -13,11 +13,13 @@ import ErrorBoundary from './components/ErrorBoundary';
 import ExportDialog from './components/ExportDialog';
 import ImageDropZone from './components/ImageDropZone';
 import PromptBar from './components/PromptBar';
+import SettingsDialog from './components/SettingsDialog';
 import Toolbar from './components/Toolbar';
 import { api } from './lib/api';
 import { hasGenerationInFlight } from './lib/generation';
 import { resolveImageMode } from './lib/image-mode';
 import { useProjectStore } from './stores/project';
+import { useSettingsStore } from './stores/settings';
 import FlatView from './views/FlatView';
 import Viewer360 from './views/Viewer360';
 
@@ -257,7 +259,8 @@ export default function App() {
           onDownload={() => void downloadProjectFile()}
           onExport={() => setExportOpen(true)}
           onNew={() => confirmCurrent(async () => { state.reset(); batch.setCurrent(null, ''); batch.setCurrentFile(null); })} />
-        {fileName && <span className="top-bar-file"><strong>{fileName}</strong> · {state.imageWidth} × {state.imageHeight} {fileSize ? `· ${formatFileSize(fileSize)}` : ''}</span>}
+        <button className="settings-btn" title="URL và API key cho 9router, fal.ai" onClick={() => useSettingsStore.getState().setOpen(true)}>⚙ Settings</button>
+        {fileName &&<span className="top-bar-file"><strong>{fileName}</strong> · {state.imageWidth} × {state.imageHeight} {fileSize ? `· ${formatFileSize(fileSize)}` : ''}</span>}
         <button className="export-final-btn" disabled={!state.imagePath || !committed} onClick={() => setExportOpen(true)}>Export Final</button>
       </header>
 
@@ -300,6 +303,7 @@ export default function App() {
         <span>{isFlatImage ? '🖼' : '🌐'} {modeLabel} · {state.workflow}</span>
       </footer>
       <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} />
+      <SettingsDialog />
       {isSavingProject && (
         <div className="project-save-progress" role="status" aria-live="polite">
           <span className="inline-spinner" />

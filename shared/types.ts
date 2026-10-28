@@ -264,7 +264,7 @@ export interface AiEditRequest {
     base64Data: string;
     mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
   }>;
-  prompt: string;  // always in English by this point
+  prompt: string;  // as typed (Vietnamese or English): the models read either
 }
 
 export interface AiEditResponse {
@@ -273,14 +273,20 @@ export interface AiEditResponse {
   model: string;
 }
 
-export interface TranslateRequest {
-  text: string;
+// ===== Settings (URL and keys entered in the app) =====
+
+/** What the Settings screen shows. Keys never leave the server: only their last characters, or null when none is set. */
+export interface SettingsStatus {
+  ninerouterBaseUrl: string;
+  ninerouterKey: string | null;
+  falAiKey: string | null;
 }
 
-export interface TranslateResponse {
-  original: string;
-  translated: string;
-  detectedLanguage: 'vi' | 'en';
+/** Fields left out (or keys left empty) keep their current value. */
+export interface SettingsUpdate {
+  ninerouterBaseUrl?: string;
+  ninerouterKey?: string;
+  falAiKey?: string;
 }
 
 // ===== Project =====

@@ -1,9 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
+import { useConfirmStore } from '../lib/confirm-dialog';
 import { startGeneration } from '../lib/generation';
 import { blobToBase64 } from '../lib/mask-utils';
 import { permissionsFor } from '../stores/workflow';
 import { useProjectStore } from '../stores/project';
+import { PROVIDER_LABEL, hasKeyFor, useSettingsStore } from '../stores/settings';
 import ModelSelector from './ModelSelector';
+
+async function askToOpenSettings(service: string) {
+  if (await useConfirmStore.getState().ask(`Chưa nhập API key ${service} nên chưa Generate được. Mở Settings để nhập?`)) {
+    useSettingsStore.getState().setOpen(true);
+  }
+}
 
 const MAX_REFERENCE_IMAGES = 3;
 const MAX_REFERENCE_BYTES = 10 * 1024 * 1024;
@@ -66,6 +74,10 @@ export default function PromptBar() {
     const model = state.selectedModel;
     const layerId = state.activeLayerId;
     if (!layerId || !model || !prompt.trim()) return;
+    if (!hasKeyFor(useSettingsStore.getState().status, model.provider)) {
+      void askToOpenSettings(PROVIDER_LABEL[model.provider]);
+      return;
+    }
     setError('');
     startGeneration({
       layerId,

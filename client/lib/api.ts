@@ -66,10 +66,13 @@ export const api = {
   ai: {
     models: () =>
       request<import('../../shared/types').ModelCatalogResponse>('GET', '/ai/models'),
-    translate: (text: string) =>
-      request<{ translated: string; detectedLanguage: string }>('POST', '/ai/translate', { text }),
     edit: (body: import('../../shared/types').AiEditRequest) =>
       request<{ base64Result: string; provider: string; model: string }>('POST', '/ai/edit', body),
+  },
+  settings: {
+    get: () => request<import('../../shared/types').SettingsStatus>('GET', '/settings'),
+    save: (body: import('../../shared/types').SettingsUpdate) =>
+      request<import('../../shared/types').SettingsStatus>('PUT', '/settings', body),
   },
   project: {
     // Download project as ZIP bundle (.360project)

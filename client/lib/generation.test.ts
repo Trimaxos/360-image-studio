@@ -48,7 +48,6 @@ function fakeEverything(t: any) {
   const edits: Array<ReturnType<typeof deferred>> = [];
   const calls: any[] = [];
   let saved = 0;
-  t.mock.method(api.ai, 'translate', async (text: string) => ({ translated: `EN:${text}`, detectedLanguage: 'vi' }));
   t.mock.method(api.ai, 'edit', (body: any) => { calls.push(body); const edit = deferred(); edits.push(edit); return edit.promise; });
   t.mock.method(api.image, 'saveResultCache', async () => ({ resultImageId: `cache-${++saved}`, sizeBytes: 1 }));
   const sourceImage = t.mock.method(generationSteps, 'sourceImage', async () => 'source-base64');
@@ -190,7 +189,7 @@ test('a result that arrives after another image was opened or the layer was dele
   assert.deepEqual(useProjectStore.getState().generations, {});
 });
 
-test('the chain is the same as before: translate, source of the result being looked at, mask, references, region', async (t) => {
+test('the chain: the prompt as typed (no translation), source of the result being looked at, mask, references, region', async (t) => {
   const fake = fakeEverything(t);
   const [layerId] = openLayers(1);
   useProjectStore.getState().updateLayer(layerId, {
@@ -219,7 +218,7 @@ test('the chain is the same as before: translate, source of the result being loo
   assert.equal(sent.base64Mask, 'region-mask');
   assert.equal(sent.hasRegionMask, true);
   assert.deepEqual(sent.referenceImages, [{ base64Data: 'ref-1', mimeType: 'image/png' }]);
-  assert.match(sent.prompt, /^EN:dọn sạch quầng sáng \(apply this specifically within the region at /);
+  assert.match(sent.prompt, /^dọn sạch quầng sáng \(apply this specifically within the region at /);
   assert.match(sent.prompt, /Image\/Figure 1 is the source scene to edit/);
 
   fake.edits[0].resolve(aiResult());
@@ -241,7 +240,7 @@ test('looking at the original makes the layer own tile the source, and an unsupp
   assert.equal(fake.calls[0].base64Mask, 'white-mask');
   assert.equal(fake.calls[0].hasRegionMask, false);
   assert.deepEqual(fake.calls[0].referenceImages, []);
-  assert.equal(fake.calls[0].prompt, 'EN:hdr');
+  assert.equal(fake.calls[0].prompt, 'hdr');
 });
 
 test('hasGenerationInFlight is true while anything is queued or running, false for failures only', () => {

@@ -98,12 +98,10 @@ test('text to image model is omitted', () => {
 });
 
 
-test('9router models are only offered when a key is configured, Flare first', (t) => {
+test('9router models are offered even without a key (Generate asks for it), Flare first', (t) => {
   const old = config.ninerouterKey;
   t.after(() => { config.ninerouterKey = old; });
   config.ninerouterKey = '';
-  assert.deepEqual(ninerouterOptions(), []);
-  config.ninerouterKey = 'nr-key';
   const models = ninerouterOptions();
   assert.deepEqual(models.map((m) => m.id), ['cx/gpt-image-2.5-flare', 'cx/gpt-6-astra']);
   const [flare] = models;

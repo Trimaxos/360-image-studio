@@ -288,7 +288,7 @@ test('ninerouter provider requires an API key and reports gateway errors', async
   config.ninerouterKey = '';
   t.after(() => { config.ninerouterKey = old; });
   const provider = getProviderFor('ninerouter', 'cx/gpt-6-astra');
-  await assert.rejects(provider.edit(source.toString('base64'), '', 'edit'), /NINEROUTER_API_KEY/);
+  await assert.rejects(provider.edit(source.toString('base64'), '', 'edit'), /Chưa nhập API key 9router/);
   config.ninerouterKey = 'nr-key';
   t.mock.method(globalThis, 'fetch', async () => new Response('quota exceeded', { status: 429 }));
   await assert.rejects(provider.edit(source.toString('base64'), '', 'edit'), /429.*quota exceeded/);

@@ -41,17 +41,21 @@ const draftSelection = (prompt: string) => ({
   viewPose: { yaw: 0, pitch: 0, roll: 0, fov: 60 }, prompt,
 });
 
-async function mountOpenLayer(t: any, prompt = 'hdr please') {
+const withKeys = { ninerouterBaseUrl: 'http://gateway/v1', ninerouterKey: '…abcd', falAiKey: '…wxyz' };
+
+async function mountOpenLayer(t: any, prompt = 'hdr please', settings: object = withKeys) {
   const { JSDOM } = await importUnsafe('jsdom');
   const dom = new JSDOM('<!doctype html><html><body></body></html>', { pretendToBeVisual: true });
   setupDom(dom);
   const { createRoot } = await importUnsafe('react-dom/client');
   const { useProjectStore } = await importUnsafe('../stores/project');
+  const { useSettingsStore } = await importUnsafe('../stores/settings');
   const { api } = await importUnsafe('../lib/api');
   const { generationSteps } = await importUnsafe('../lib/generation');
   const PromptBar = (await importUnsafe('./PromptBar')).default;
+  useSettingsStore.setState({ status: null, open: false });
+  t.mock.method(api.settings, 'get', async () => settings);
   t.mock.method(api.ai, 'models', async () => ({ groups: [{ provider: 'ninerouter', label: '9router', models: [aiModel] }] }));
-  t.mock.method(api.ai, 'translate', async (text: string) => ({ translated: `EN:${text}`, detectedLanguage: 'vi' }));
   const edits: Array<(value: unknown) => void> = [];
   t.mock.method(api.ai, 'edit', () => new Promise((resolve) => { edits.push(resolve); }));
   t.mock.method(api.image, 'saveResultCache', async () => ({ resultImageId: 'cache-1', sizeBytes: 1 }));
@@ -74,9 +78,60 @@ async function mountOpenLayer(t: any, prompt = 'hdr please') {
   const generate = () => container.querySelector('button.prompt-btn-generate') as HTMLButtonElement;
   const input = () => container.querySelector('input[placeholder="Nhập prompt..."]') as HTMLInputElement;
   const settle = async () => { for (let i = 0; i < 12; i += 1) await act(async () => { await new Promise((resolve) => setImmediate(resolve)); }); };
+  await settle();
   const close = async () => { await act(async () => root.unmount()); dom.window.close(); };
   return { store: useProjectStore, container, generate, input, first, second, edits, settle, close };
 }
+
+test('Generate without a key for the model service asks to open Settings and sends nothing', async (t) => {
+  const { store, generate, first, edits, settle, close } = await mountOpenLayer(t, 'hdr please',
+    { ninerouterBaseUrl: 'http://gateway/v1', ninerouterKey: null, falAiKey: '…wxyz' });
+  const { useConfirmStore } = await importUnsafe('../lib/confirm-dialog');
+  const { useSettingsStore } = await importUnsafe('../stores/settings');
+  try {
+    await act(async () => generate().click());
+    await settle();
+    assert.match(useConfirmStore.getState().request?.message ?? '', /Chưa nhập API key 9router/);
+    assert.equal(edits.length, 0, 'nothing went to the AI');
+    assert.equal(store.getState().generations[first], undefined);
+
+    await act(async () => useConfirmStore.getState().answer(true));
+    assert.equal(useSettingsStore.getState().open, true, 'yes opens Settings');
+  } finally {
+    await close();
+  }
+});
+
+test('the model picked at first is one whose service already has a key', async (t) => {
+  const { JSDOM } = await importUnsafe('jsdom');
+  const dom = new JSDOM('<!doctype html><html><body></body></html>', { pretendToBeVisual: true });
+  setupDom(dom);
+  const { createRoot } = await importUnsafe('react-dom/client');
+  const { useProjectStore } = await importUnsafe('../stores/project');
+  const { useSettingsStore } = await importUnsafe('../stores/settings');
+  const { api } = await importUnsafe('../lib/api');
+  const PromptBar = (await importUnsafe('./PromptBar')).default;
+  const falModel = { id: 'fal-test', provider: 'fal', displayName: 'Fal', enabled: true };
+  useSettingsStore.setState({ status: null, open: false });
+  t.mock.method(api.settings, 'get', async () => ({ ninerouterBaseUrl: 'http://gateway/v1', ninerouterKey: null, falAiKey: '…wxyz' }));
+  t.mock.method(api.ai, 'models', async () => ({ groups: [
+    { provider: 'ninerouter', label: '9router', models: [aiModel] },
+    { provider: 'fal', label: 'fal.ai', models: [falModel] },
+  ] }));
+  useProjectStore.getState().reset();
+  useProjectStore.setState({ selectedModel: null }); // the choice of an earlier test outlives reset()
+  const container = dom.window.document.createElement('div');
+  dom.window.document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(createElement(PromptBar)));
+    for (let i = 0; i < 12; i += 1) await act(async () => { await new Promise((resolve) => setImmediate(resolve)); });
+    assert.equal(useProjectStore.getState().selectedModel?.id, 'fal-test');
+  } finally {
+    await act(async () => root.unmount());
+    dom.window.close();
+  }
+});
 
 test('Generate starts a generation of the open layer without putting the whole app in a generating state', async (t) => {
   const { store, generate, input, first, edits, settle, close } = await mountOpenLayer(t);

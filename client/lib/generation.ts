@@ -110,14 +110,13 @@ function stillWanted(job: Job): boolean {
 
 async function run(job: Job): Promise<void> {
   try {
-    const translated = (await api.ai.translate(job.prompt)).translated;
     const base64Image = await generationSteps.sourceImage({ imagePath: job.imagePath, sourceResultId: job.sourceResultId, tile: job.tile });
     const { region } = job;
     const mask = region?.maskBase64 ?? await generationSteps.whiteMask(job.size.width, job.size.height);
     // Many models have no real mask input at all — without this they have no idea where in the image the region is.
     const located = region
-      ? `${translated} (apply this specifically within the region at ${describeRegionLocation(region.points, job.size.width, job.size.height)})`
-      : translated;
+      ? `${job.prompt} (apply this specifically within the region at ${describeRegionLocation(region.points, job.size.width, job.size.height)})`
+      : job.prompt;
     const references = job.model.supportsReferenceImages ? job.referenceImages : [];
     const prompt = references.length
       ? `${located}\nImage/Figure 1 is the source scene to edit. Image(s)/Figure(s) 2-${references.length + 1} are visual references. Use the referenced subject, appearance, colors, design, and details as requested, place the result into Image/Figure 1, and do not treat the reference images as the output canvas.`

@@ -141,6 +141,19 @@ html, body, #root {
   list-style: none;
   white-space: nowrap;
 }
+.settings-btn {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--text2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.settings-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
 .file-menu summary::-webkit-details-marker {
   display: none;
 }
@@ -758,6 +771,12 @@ html, body, #root {
 }
 .modal-row input[readonly] {
   cursor: pointer;
+}
+.settings-dialog {
+  width: 480px;
+}
+.settings-dialog .modal-row label {
+  width: 110px;
 }
 .modal-note {
   font-size: 12px;

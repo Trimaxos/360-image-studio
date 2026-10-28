@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { ModelCatalogResponse } from '../../shared/types';
 import { api } from '../lib/api';
 import { useProjectStore } from '../stores/project';
+import { hasKeyFor, useSettingsStore } from '../stores/settings';
 
 export default function ModelSelector({ disabled }: { disabled: boolean }) {
   const [catalog, setCatalog] = useState<ModelCatalogResponse | null>(null);
@@ -12,9 +13,12 @@ export default function ModelSelector({ disabled }: { disabled: boolean }) {
   const load = async () => {
     setError('');
     try {
-      const result = await api.ai.models();
+      const [result] = await Promise.all([api.ai.models(), useSettingsStore.getState().load()]);
       setCatalog(result);
-      const first = result.groups.flatMap((group) => group.models).find((model) => model.enabled);
+      // The first model whose service already has a key, else the first one (Generate then asks for the key).
+      const status = useSettingsStore.getState().status;
+      const enabled = result.groups.flatMap((group) => group.models).filter((model) => model.enabled);
+      const first = enabled.find((model) => hasKeyFor(status, model.provider)) ?? enabled[0];
       if (!useProjectStore.getState().selectedModel && first) setSelected(first);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Không tải được model');

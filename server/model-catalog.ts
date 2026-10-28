@@ -210,8 +210,8 @@ async function falOptions(): Promise<AiModelOption[]> {
 // returns an image through the Responses image_generation tool, and the other
 // cx/* models answer "no image-editing tool is available". Neither is listed
 // by /models, so they are declared here.
+// Offered even without a key: Generate then asks for it on the Settings screen.
 export function ninerouterOptions(): AiModelOption[] {
-  if (!config.ninerouterKey) return [];
   return [{
     id: 'cx/gpt-image-2.5-flare',
     displayName: 'GPT Image 2.5 Flare (High) — 9router',

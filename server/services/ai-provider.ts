@@ -226,7 +226,7 @@ class FalProvider implements AiProvider {
     prompt: string,
     referenceImages: Array<{ base64Data: string; mimeType: string }> = [],
   ) {
-    if (!config.falAiKey) throw new Error('FAL_AI_KEY chưa được cấu hình');
+    if (!config.falAiKey) throw new Error('Chưa nhập key fal.ai — mở ⚙ Settings để nhập.');
 
     const sourceImage = Buffer.from(base64Image, 'base64');
     const sourceMetadata = await sharp(sourceImage).metadata();
@@ -384,7 +384,7 @@ class NineRouterProvider implements AiProvider {
     return { base64Result: normalized.toString('base64'), model: this.modelId };
   }
   async edit(base64Image: string, _base64Mask: string, prompt: string) {
-    if (!config.ninerouterKey) throw new Error('NINEROUTER_API_KEY chưa được cấu hình');
+    if (!config.ninerouterKey) throw new Error('Chưa nhập API key 9router — mở ⚙ Settings để nhập.');
     if (NINEROUTER_IMAGES_API_MODEL.test(this.modelId)) return this.editViaImagesApi(base64Image, prompt);
     const sourceImage = Buffer.from(base64Image, 'base64');
     const editRequest = this.isRegionEdit ? buildRegionEditPrompt(prompt) : buildPreservationPrompt(prompt);

@@ -87,7 +87,7 @@ Model mặc định của ứng dụng là **GPT Image 2.5 Flare (High) — 9rou
    Trình duyệt tự mở trang quản lý `http://localhost:20128/dashboard`. **Giữ cửa sổ PowerShell này mở** trong lúc dùng ứng dụng; đóng cửa sổ là 9router dừng.
 
 4. Trên trang quản lý, vào **Providers** → kết nối **Codex** → đăng nhập bằng tài khoản ChatGPT do quản trị viên cung cấp.
-5. Tạo hoặc sao chép **API Key** trên trang quản lý (dạng `sk-...`), dùng cho mục 6.
+5. Tạo hoặc sao chép **API Key** trên trang quản lý (dạng `sk-...`), dùng cho mục 7 (nhập trong ⚙ Settings).
 
 Cập nhật 9router lên bản mới:
 
@@ -97,28 +97,14 @@ npm install -g 9router@latest
 
 ## 6. Tạo cấu hình môi trường
 
-Mở PowerShell trong thư mục bộ cài:
+Mở PowerShell trong thư mục bộ cài và tạo file `.env` từ file mẫu:
 
 ```powershell
 cd D:\360-image-studio
 Copy-Item .env.example .env
-notepad .env
 ```
 
-Điền các API key do quản trị viên cung cấp:
-
-```env
-FAL_AI_KEY=your_fal_ai_key_here
-DEEPSEEK_API_KEY=your_deepseek_api_key_here
-OPENCODE_API_KEY=your_opencode_go_api_key_here
-PORT=3001
-NINEROUTER_API_KEY=your_9router_api_key_here
-```
-
-- `NINEROUTER_API_KEY`: API Key lấy ở mục 5. Có key này thì model mặc định là GPT Image 2.5 Flare (High) — 9router. 9router phải đang chạy trên chính máy này; ứng dụng trong Docker tự kết nối tới đó.
-- `FAL_AI_KEY`: dùng cho model GPT Image 2.5 Flare Edit (Medium) của fal.ai. Để trống thì không dùng được model này; không có `NINEROUTER_API_KEY` thì đây là model mặc định.
-
-Không gửi file `.env` cho người ngoài vì file này chứa API key.
+Không cần điền gì vào file này: API key được nhập ngay trong ứng dụng (mục 7).
 
 ## 7. Nạp image và chạy lần đầu
 
@@ -162,6 +148,14 @@ Hoặc nhập vào trình duyệt:
 ```text
 http://localhost:3001
 ```
+
+Nhập API key: bấm nút **⚙ Settings** trên thanh trên cùng, điền rồi bấm **Lưu**.
+
+- `URL 9router`: giữ nguyên giá trị có sẵn khi 9router chạy trên chính máy này.
+- `API key 9router`: API Key lấy ở mục 5. Có key này thì model mặc định là GPT Image 2.5 Flare (High) — 9router.
+- `Key fal.ai`: dùng cho model GPT Image 2.5 Flare Edit (Medium) của fal.ai. Để trống thì không dùng được model này.
+
+Chỉ cần nhập một lần: tắt mở lại máy hay cập nhật phiên bản mới (mục 10) đều không phải nhập lại. Bấm Generate khi model đang chọn chưa có key, ứng dụng sẽ nhắc mở Settings.
 
 ## 8. Sử dụng hằng ngày
 
@@ -262,6 +256,6 @@ Không chạy lệnh sau nếu chưa được quản trị viên xác nhận:
 docker compose down -v
 ```
 
-Tùy chọn `-v` xóa Docker volume chứa cache và dữ liệu cục bộ.
+Tùy chọn `-v` xóa Docker volume chứa cache, dữ liệu cục bộ và các key đã nhập trong ⚙ Settings.
 
 Nên dùng chức năng **Download Project** thường xuyên. Docker volume không thay thế file project sao lưu; nếu Windows hoặc ổ đĩa hỏng, dữ liệu trong volume vẫn có thể mất.

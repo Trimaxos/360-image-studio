@@ -7,8 +7,11 @@ import { imageRouter } from './routes/image';
 import { aiRouter } from './routes/ai';
 import { projectRouter } from './routes/project';
 import { filesystemRouter } from './routes/filesystem';
+import { settingsRouter } from './routes/settings';
+import { applySavedSettings } from './settings';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+applySavedSettings();
 const app = express();
 
 app.use(cors());
@@ -22,6 +25,7 @@ app.use('/api/image', imageRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/project', projectRouter);
 app.use('/api/filesystem', filesystemRouter);
+app.use('/api/settings', settingsRouter);
 
 // Static + SPA fallback (keep at bottom)
 const clientDist = path.join(__dirname, '..', 'dist', 'client');
