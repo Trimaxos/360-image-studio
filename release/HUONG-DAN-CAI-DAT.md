@@ -61,7 +61,41 @@ docker version
 docker compose version
 ```
 
-## 5. Tạo cấu hình môi trường
+## 5. Cài 9router (model AI mặc định)
+
+Model mặc định của ứng dụng là **GPT Image 2.5 Flare (High) — 9router**, chạy qua 9router bằng tài khoản ChatGPT. 9router là một chương trình chạy trên chính máy Windows này (cổng `20128`), không nằm trong Docker. Bỏ qua mục này nếu chỉ dùng model fal.ai.
+
+1. Cài Node.js bản LTS (18 trở lên) từ [nodejs.org](https://nodejs.org), giữ các tùy chọn mặc định. Kiểm tra trong PowerShell:
+
+   ```powershell
+   node -v
+   npm -v
+   ```
+
+2. Cài 9router:
+
+   ```powershell
+   npm install -g 9router
+   ```
+
+3. Chạy 9router:
+
+   ```powershell
+   9router
+   ```
+
+   Trình duyệt tự mở trang quản lý `http://localhost:20128/dashboard`. **Giữ cửa sổ PowerShell này mở** trong lúc dùng ứng dụng; đóng cửa sổ là 9router dừng.
+
+4. Trên trang quản lý, vào **Providers** → kết nối **Codex** → đăng nhập bằng tài khoản ChatGPT do quản trị viên cung cấp.
+5. Tạo hoặc sao chép **API Key** trên trang quản lý (dạng `sk-...`), dùng cho mục 6.
+
+Cập nhật 9router lên bản mới:
+
+```powershell
+npm install -g 9router@latest
+```
+
+## 6. Tạo cấu hình môi trường
 
 Mở PowerShell trong thư mục bộ cài:
 
@@ -75,18 +109,18 @@ notepad .env
 
 ```env
 FAL_AI_KEY=your_fal_ai_key_here
-AI_MODEL=fal-ai/flux-2/klein/9b/edit
 DEEPSEEK_API_KEY=your_deepseek_api_key_here
 OPENCODE_API_KEY=your_opencode_go_api_key_here
 PORT=3001
 NINEROUTER_API_KEY=your_9router_api_key_here
 ```
 
-`NINEROUTER_API_KEY` là tùy chọn, chỉ cần khi dùng 9router (Codex). 9router phải đang chạy trên chính máy Windows này ở cổng `20128`; ứng dụng trong Docker tự kết nối tới đó.
+- `NINEROUTER_API_KEY`: API Key lấy ở mục 5. Có key này thì model mặc định là GPT Image 2.5 Flare (High) — 9router. 9router phải đang chạy trên chính máy này; ứng dụng trong Docker tự kết nối tới đó.
+- `FAL_AI_KEY`: dùng cho model GPT Image 2.5 Flare Edit (Medium) của fal.ai. Để trống thì không dùng được model này; không có `NINEROUTER_API_KEY` thì đây là model mặc định.
 
 Không gửi file `.env` cho người ngoài vì file này chứa API key.
 
-## 6. Nạp image và chạy lần đầu
+## 7. Nạp image và chạy lần đầu
 
 Đảm bảo Docker Desktop đang chạy, sau đó thực hiện:
 
@@ -129,13 +163,16 @@ Hoặc nhập vào trình duyệt:
 http://localhost:3001
 ```
 
-## 7. Sử dụng hằng ngày
+## 8. Sử dụng hằng ngày
 
 Thông thường chỉ cần:
 
 1. Mở Docker Desktop.
 2. Chờ Docker Engine khởi động.
-3. Mở `http://localhost:3001`.
+3. Mở PowerShell, chạy `9router` và giữ cửa sổ đó mở (bỏ qua nếu không dùng 9router).
+4. Mở `http://localhost:3001`.
+
+Nếu Generate báo lỗi kết nối 9router (`fetch failed`, `ECONNREFUSED`): kiểm tra cửa sổ 9router còn chạy và mở được `http://localhost:20128/dashboard`.
 
 Nếu ứng dụng chưa chạy:
 
@@ -144,7 +181,7 @@ cd D:\360-image-studio
 docker compose up -d
 ```
 
-## 8. Dừng và khởi động lại
+## 9. Dừng và khởi động lại
 
 Dừng ứng dụng nhưng giữ container:
 
@@ -164,7 +201,7 @@ Khởi động lại khi ứng dụng có vấn đề:
 docker compose restart
 ```
 
-## 9. Cập nhật phiên bản mới
+## 10. Cập nhật phiên bản mới
 
 1. Nhận file `360-image-studio.tar` phiên bản mới từ quản trị viên.
 2. Chép đè file cũ trong thư mục bộ cài (giữ nguyên file `.env`).
@@ -179,7 +216,7 @@ docker compose up -d
 
 Dữ liệu trong Docker volume vẫn được giữ khi cập nhật.
 
-## 10. Kiểm tra và xử lý lỗi
+## 11. Kiểm tra và xử lý lỗi
 
 Kiểm tra trạng thái:
 
@@ -217,7 +254,7 @@ netstat -ano | Select-String ':3001'
 
 Gửi kết quả `docker compose ps` và `docker compose logs --tail=100` cho quản trị viên nếu không tự xử lý được.
 
-## 11. Bảo vệ dữ liệu
+## 12. Bảo vệ dữ liệu
 
 Không chạy lệnh sau nếu chưa được quản trị viên xác nhận:
 
