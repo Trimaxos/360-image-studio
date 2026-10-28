@@ -23,6 +23,7 @@ Mục tiêu: xem ảnh, chọn vùng, chỉnh AI, cân đường chân trời, x
 - **Simplicity First** — Code tối thiểu. Không abstraction cho single-use.
 - **Surgical Changes** — Chỉ chạm thứ cần. Theo style có sẵn.
 - **Goal-Driven** — Xác định success criteria. Loop đến khi verify.
+- **Docker tự build (bắt buộc, ngoại lệ của "Hỏi → trả lời"):** Sau khi sửa code xong và đã verify tính năng chạy đúng (test pass + kiểm trên app thật), tự chạy `docker compose up -d --build` không cần hỏi. Xong kiểm container `healthy` và tính năng vừa sửa chạy đúng trên bản Docker (`http://127.0.0.1:3001`). Build lấy cả thay đổi chưa commit trong working tree → báo user những file đó có trong bản build. Code chưa verify xong hoặc đang dở → không build.
 - **Agent (bắt buộc):** Không dùng agent chạy ngầm dạng Workflow. Cần agent thì chạy subagent hiển thị (Agent tool, chạy foreground — `run_in_background: false`) để user xem được.
 
 ## Architecture (from Plan.md)
