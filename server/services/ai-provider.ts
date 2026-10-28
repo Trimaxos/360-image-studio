@@ -373,9 +373,12 @@ class NineRouterProvider implements AiProvider {
     const b64 = data.data?.[0]?.b64_json;
     if (!b64) throw new Error('9router không trả ảnh');
     const resultBuffer = Buffer.from(b64, 'base64');
+    // The gateway picks its own resolution (asked 1024×1024, got 1254×1254), so only the shape is checked:
+    // the result is stretched back to the crop, which is exact as long as the aspect ratio held.
     const actual = await sharp(resultBuffer).metadata();
-    if (actual.width !== size.width || actual.height !== size.height) {
-      throw new Error(`Model trả ảnh sai kích thước: ${actual.width}×${actual.height}; yêu cầu ${size.width}×${size.height}. Hãy thử lại.`);
+    const drift = Math.abs((actual.width! / actual.height!) / (size.width / size.height) - 1);
+    if (drift > NINEROUTER_ASPECT_TOLERANCE) {
+      throw new Error(`Model trả ảnh sai tỉ lệ: ${actual.width}×${actual.height}; yêu cầu ${size.width}×${size.height}. Hãy thử lại.`);
     }
     const normalized = await normalizeResultToSourceDimensions(sourceImage, resultBuffer);
     return { base64Result: normalized.toString('base64'), model: this.modelId };

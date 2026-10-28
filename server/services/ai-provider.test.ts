@@ -351,7 +351,20 @@ test('ninerouter gpt-image model defaults to high quality without extraParams', 
   assert.equal(quality, 'high');
 });
 
-test('ninerouter gpt-image model fails when no image or a wrong size comes back', async (t) => {
+test('ninerouter gpt-image model accepts its own resolution when the aspect ratio matches', async (t) => {
+  const old = config.ninerouterKey;
+  config.ninerouterKey = 'nr-key';
+  t.after(() => { config.ninerouterKey = old; });
+  const source = await solidPng(876, 876);
+  // Asked for 1024x1024, the gateway answers with its own square size.
+  const generated = await solidPng(1254, 1254);
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ data: [{ b64_json: generated.toString('base64') }] }));
+  const result = await getProviderFor('ninerouter', 'cx/gpt-image-2.5-flare').edit(source.toString('base64'), '', 'edit');
+  const meta = await sharp(Buffer.from(result.base64Result, 'base64')).metadata();
+  assert.deepEqual([meta.width, meta.height], [876, 876]);
+});
+
+test('ninerouter gpt-image model fails when no image or a wrong aspect ratio comes back', async (t) => {
   const old = config.ninerouterKey;
   config.ninerouterKey = 'nr-key';
   t.after(() => { config.ninerouterKey = old; });
@@ -361,7 +374,7 @@ test('ninerouter gpt-image model fails when no image or a wrong size comes back'
   await assert.rejects(provider.edit(source.toString('base64'), '', 'edit'), /9router không trả ảnh/);
   const wrong = await solidPng(1024, 1024);
   t.mock.method(globalThis, 'fetch', async () => Response.json({ data: [{ b64_json: wrong.toString('base64') }] }));
-  await assert.rejects(provider.edit(source.toString('base64'), '', 'edit'), /sai kích thước.*1024×1024.*1536×1024/);
+  await assert.rejects(provider.edit(source.toString('base64'), '', 'edit'), /sai tỉ lệ.*1024×1024.*1536×1024/);
   t.mock.method(globalThis, 'fetch', async () => new Response('boom', { status: 500 }));
   await assert.rejects(provider.edit(source.toString('base64'), '', 'edit'), /9router error: 500 boom/);
 });
