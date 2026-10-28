@@ -36,5 +36,5 @@ export function gridCells(width: number, height: number, cols: number, rows: num
 }
 
 export function buildGridPrompt(cols: number, rows: number): string {
-  return `Chia ảnh này thành ${cols * rows} tile riêng biệt theo lưới ${cols} cột × ${rows} hàng, bằng nhau. Giữ nguyên ảnh gốc, chỉ cắt, không vẽ lại, không chỉnh sửa. Các tile không chồng mép, ghép lại phải khớp đúng ảnh gốc. Xuất từng tile thành file riêng, đánh số từ trái sang phải, từ trên xuống dưới.`;
+  return `Chia ảnh này theo lưới ${cols} cột × ${rows} hàng, các phần nằm liền kề và không chồng lên nhau, rồi tạo lại từng phần thành một ảnh độ phân giải cao, sắc nét. Xuất ${cols * rows} ảnh riêng, đánh số từ trái sang phải, từ trên xuống dưới.`;
 }

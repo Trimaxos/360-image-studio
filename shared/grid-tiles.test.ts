@@ -36,6 +36,6 @@ test('gridCells covers the image exactly, without gaps or overlaps, left to righ
 test('buildGridPrompt states the tile count and grid', () => {
   assert.equal(
     buildGridPrompt(3, 2),
-    'Chia ảnh này thành 6 tile riêng biệt theo lưới 3 cột × 2 hàng, bằng nhau. Giữ nguyên ảnh gốc, chỉ cắt, không vẽ lại, không chỉnh sửa. Các tile không chồng mép, ghép lại phải khớp đúng ảnh gốc. Xuất từng tile thành file riêng, đánh số từ trái sang phải, từ trên xuống dưới.',
+    'Chia ảnh này theo lưới 3 cột × 2 hàng, các phần nằm liền kề và không chồng lên nhau, rồi tạo lại từng phần thành một ảnh độ phân giải cao, sắc nét. Xuất 6 ảnh riêng, đánh số từ trái sang phải, từ trên xuống dưới.',
   );
 });
