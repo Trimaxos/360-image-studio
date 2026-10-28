@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { SphereGeometry, Mesh, MeshBasicMaterial, TextureLoader } from 'three';
+import type { ViewPose } from '../../shared/types';
 import { api } from '../lib/api';
 import { useProjectStore } from '../stores/project';
 import { degreesToRadians, radiansToDegrees } from '../components/view-controls';
@@ -17,6 +18,10 @@ export default function Viewer360() {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<any>(null);
   const applyingPoseRef = useRef(false);
+  // Pose the viewer is showing, in store units. A store change that only mirrors it must not
+  // be written back: zoom()/rotate() stop PSV's own animation (mouse wheel, inertia) and
+  // fovToZoomLevel rounds to whole zoom levels, so the wheel zoom snapped back every frame.
+  const shownPoseRef = useRef<Partial<ViewPose>>({});
   const overlayMeshesRef = useRef<Map<string, Mesh>>(new Map());
   const [ready, setReady] = useState(false);
   const imagePath = useProjectStore((state) => state.imagePath);
@@ -42,14 +47,15 @@ export default function Viewer360() {
       viewer.addEventListener('ready', () => setReady(true));
       viewer.addEventListener('position-updated', ({ position }: any) => {
         if (applyingPoseRef.current || useProjectStore.getState().workflow !== 'viewing') return;
-        updateViewPose({
-          yaw: radiansToDegrees(position.yaw),
-          pitch: radiansToDegrees(position.pitch),
-        });
+        const pose = { yaw: radiansToDegrees(position.yaw), pitch: radiansToDegrees(position.pitch) };
+        Object.assign(shownPoseRef.current, pose);
+        updateViewPose(pose);
       });
       viewer.addEventListener('zoom-updated', ({ zoomLevel }: any) => {
         if (applyingPoseRef.current || useProjectStore.getState().workflow !== 'viewing') return;
-        updateViewPose({ fov: viewer.dataHelper.zoomLevelToFov(zoomLevel) });
+        const pose = { fov: viewer.dataHelper.zoomLevelToFov(zoomLevel) };
+        Object.assign(shownPoseRef.current, pose);
+        updateViewPose(pose);
       });
       viewerRef.current = viewer;
     });
@@ -57,6 +63,7 @@ export default function Viewer360() {
       disposed = true;
       viewerRef.current?.destroy();
       viewerRef.current = null;
+      shownPoseRef.current = {};
       setReady(false);
     };
   }, [imagePath, updateViewPose]);
@@ -64,12 +71,19 @@ export default function Viewer360() {
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer || !ready) return;
+    const shown = shownPoseRef.current;
+    const rotate = viewPose.yaw !== shown.yaw || viewPose.pitch !== shown.pitch;
+    const zoom = viewPose.fov !== shown.fov;
+    if (!rotate && !zoom) return;
     applyingPoseRef.current = true;
-    viewer.rotate({
-      yaw: degreesToRadians(viewPose.yaw),
-      pitch: degreesToRadians(viewPose.pitch),
-    });
-    viewer.zoom(viewer.dataHelper.fovToZoomLevel(viewPose.fov));
+    if (rotate) {
+      viewer.rotate({
+        yaw: degreesToRadians(viewPose.yaw),
+        pitch: degreesToRadians(viewPose.pitch),
+      });
+    }
+    if (zoom) viewer.zoom(viewer.dataHelper.fovToZoomLevel(viewPose.fov));
+    shownPoseRef.current = { yaw: viewPose.yaw, pitch: viewPose.pitch, fov: viewPose.fov };
     requestAnimationFrame(() => { applyingPoseRef.current = false; });
   }, [viewPose.yaw, viewPose.pitch, viewPose.fov, ready]);
 
