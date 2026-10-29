@@ -76,7 +76,7 @@ Phân phối các chương trình độc lập trong cùng image không tự đ�
 
 ## 5. Dịch vụ AI, mô hình và nội dung
 
-fal.ai, DeepSeek và OpenCode là dịch vụ ngoài; MIT của ứng dụng không cấp quyền sử dụng miễn phí API, không thay điều khoản tài khoản, điều khoản từng model hay quyền đối với ảnh đầu vào/đầu ra. Người triển khai cung cấp khóa riêng và tuân thủ điều khoản tại thời điểm sử dụng; xem [điều khoản fal.ai](https://fal.ai/legal/terms-of-service).
+fal.ai, 9router và tài khoản ChatGPT mà 9router kết nối là dịch vụ ngoài; MIT của ứng dụng không cấp quyền sử dụng miễn phí API, không thay điều khoản tài khoản, điều khoản từng model hay quyền đối với ảnh đầu vào/đầu ra. Người triển khai cung cấp khóa riêng và tuân thủ điều khoản tại thời điểm sử dụng; xem [điều khoản fal.ai](https://fal.ai/legal/terms-of-service).
 
 Bản mã nguồn hiện tại gọi dịch vụ AI qua API. Giấy phép MIT này không cấp lại quyền đối với trọng số mô hình, ảnh người dùng, nhãn hiệu hoặc hình ảnh của bên thứ ba. Nguồn gốc và quyền của hình ảnh mockup/screenshot chưa được xác minh độc lập trong lần rà soát thư viện này; cần kiểm tra trước khi tái sử dụng chúng trong sản phẩm hoặc tài liệu quảng bá.
 

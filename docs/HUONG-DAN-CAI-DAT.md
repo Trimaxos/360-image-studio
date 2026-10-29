@@ -48,26 +48,14 @@ Không chạy trực tiếp ứng dụng bên trong file ZIP.
 
 ## 5. Tạo cấu hình môi trường
 
-Mở PowerShell trong thư mục vừa giải nén:
+Mở PowerShell trong thư mục vừa giải nén và tạo file `.env` từ file mẫu:
 
 ```powershell
 cd D:\360-image-studio
 Copy-Item .env.example .env
-notepad .env
 ```
 
-Điền các API key do quản trị viên cung cấp:
-
-```env
-FAL_AI_KEY=your_fal_ai_key_here
-AI_MODEL=fal-ai/flux-2/klein/9b/edit
-DEEPSEEK_API_KEY=your_deepseek_api_key_here
-PORT=3001
-```
-
-Giữ nguyên `AUTH_USERNAME` và `AUTH_PASSWORD_HASH` nếu quản trị viên không yêu cầu thay đổi.
-
-Không gửi file `.env` cho người ngoài vì file này chứa API key.
+Không cần điền gì vào file này: API key được nhập ngay trong ứng dụng (mục 6).
 
 ## 6. Build và chạy lần đầu
 
@@ -97,6 +85,14 @@ Hoặc nhập vào trình duyệt:
 ```text
 http://localhost:3001
 ```
+
+Nhập API key: bấm nút **⚙ Settings** trên thanh trên cùng, điền rồi bấm **Lưu**.
+
+- `URL 9router`: giữ nguyên giá trị có sẵn khi 9router chạy trên chính máy này.
+- `API key 9router`: lấy trên trang quản lý 9router. Cách cài 9router xem mục 5 trong [hướng dẫn bộ cài](../release/HUONG-DAN-CAI-DAT.md).
+- `Key fal.ai`: dùng cho các model fal.ai. Để trống thì không dùng được các model này.
+
+Chỉ cần nhập một lần: key được lưu trong Docker volume, build lại hay cập nhật source mới đều không phải nhập lại.
 
 ## 7. Sử dụng hằng ngày
 
@@ -193,6 +189,6 @@ Không chạy lệnh sau nếu chưa được quản trị viên xác nhận:
 docker compose down -v
 ```
 
-Tùy chọn `-v` xóa Docker volume chứa cache và dữ liệu cục bộ.
+Tùy chọn `-v` xóa Docker volume chứa cache, dữ liệu cục bộ và các key đã nhập trong ⚙ Settings.
 
 Nên dùng chức năng **Download Project** thường xuyên. Docker volume không thay thế file project sao lưu; nếu Windows hoặc ổ đĩa hỏng, dữ liệu trong volume vẫn có thể mất.

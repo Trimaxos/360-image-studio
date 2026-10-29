@@ -5,13 +5,13 @@ Trình chỉnh sửa ảnh panorama 360° và ảnh phẳng trên trình duyệt
 - Xem panorama equirectangular, điều chỉnh góc nhìn và đường chân trời.
 - Chỉnh ảnh theo vùng, quản lý layer và so sánh các biến thể kết quả.
 - Lưu/mở dự án `.360project` và xuất ảnh.
-- Viết prompt tiếng Việt; hỗ trợ dịch qua DeepSeek hoặc OpenCode.
+- Model AI qua fal.ai hoặc 9router (GPT Image bằng tài khoản ChatGPT); URL và API key nhập ngay trong ứng dụng (⚙ Settings).
 
 **Công nghệ:** React, TypeScript, Photo Sphere Viewer, Fabric.js, Express và Sharp/libvips.
 
 ## Chạy từ mã nguồn
 
-Cài Node.js 22.12+ và npm. Sao chép `.env.example` thành `.env`, điền `FAL_AI_KEY` và cấu hình đăng nhập riêng. Các khóa dịch prompt là tùy chọn; dịch vụ AI có điều khoản và chi phí riêng.
+Cài Node.js 22.12+ và npm. Sao chép `.env.example` thành `.env`; API key có thể để trống ở đó và nhập trong ứng dụng (⚙ Settings). Dịch vụ AI có điều khoản và chi phí riêng.
 
 ```sh
 npm ci
