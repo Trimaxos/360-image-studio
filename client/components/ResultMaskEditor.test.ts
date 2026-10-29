@@ -307,3 +307,143 @@ test('when the 360 view cannot be updated the editor stays open, says why, and t
     await close();
   }
 });
+
+// --- Defaults and the wheel / X shortcuts of the brush ---
+
+// The mask canvas is the only one that gets filled: record the colour of each fill (canvas 2D is a no-op stub here).
+function recordMaskFills(dom: any) {
+  const fills: string[] = [];
+  const proto = dom.window.HTMLCanvasElement.prototype;
+  const getContext = proto.getContext;
+  proto.getContext = function (...args: any[]) {
+    const context = getContext.apply(this, args);
+    if (!context.__recorded) {
+      const fillRect = context.fillRect;
+      context.fillRect = function (...rect: any[]) { fills.push(this.fillStyle); return fillRect.apply(this, rect); };
+      context.__recorded = true;
+    }
+    return context;
+  };
+  return fills;
+}
+
+async function mountEditor(variant: any) {
+  const { JSDOM } = await importUnsafe('jsdom');
+  const dom = new JSDOM('<!doctype html><html><body></body></html>', { pretendToBeVisual: true });
+  setup(dom, () => ({ width: 200, height: 100 }));
+  const fills = recordMaskFills(dom);
+  const React = await importUnsafe('react');
+  const { createRoot } = await importUnsafe('react-dom/client');
+  const { useProjectStore } = await importUnsafe('../stores/project');
+  const ResultMaskEditor = (await importUnsafe('./ResultMaskEditor')).default;
+  useProjectStore.setState({ layers: [{ ...LAYER, variants: [variant] }] } as any);
+  const container = dom.window.document.createElement('div');
+  dom.window.document.body.appendChild(container);
+  const root = createRoot(container);
+  const settle = () => React.act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+  await React.act(async () => { root.render(createElement(ResultMaskEditor, { layerId: 'layer', variant, onClose() {} })); });
+  await settle();
+  const button = (label: string) => (Array.from(container.querySelectorAll('button')) as HTMLButtonElement[])
+    .find((item) => item.textContent?.includes(label))!;
+  const readouts = () => Array.from(container.querySelectorAll('.result-mask-sliders strong')).map((item: any) => item.textContent);
+  const wheel = (init: object) => container.querySelector('.result-mask-workspace')!
+    .dispatchEvent(new dom.window.WheelEvent('wheel', { bubbles: true, cancelable: true, ...init }));
+  const close = async () => { await React.act(async () => { root.unmount(); }); dom.window.close(); };
+  return { React, dom, container, fills, button, readouts, wheel, settle, close };
+}
+
+const FRESH_VARIANT = { id: 'v', resultImageId: 'r', source: 'ai-generated', applied: false, width: 200, height: 100, createdAt: 1 };
+
+test('a result not refined yet opens hidden over the original, with a 200px restore brush and a 40% core', async () => {
+  const { container, fills, button, readouts, close } = await mountEditor(FRESH_VARIANT);
+  try {
+    assert.deepEqual(fills, ['#000'], 'the whole result starts hidden, as after Xóa toàn bộ');
+    assert.ok(button('ảnh gốc').textContent?.includes('Ẩn ảnh gốc'), 'the original is shown');
+    assert.ok(button('Phục hồi').classList.contains('active'), 'the brush restores');
+    assert.equal(button('Xóa').classList.contains('active'), false);
+    assert.deepEqual(readouts(), ['200px', '100%', '40%']);
+    assert.ok(container.querySelector('.result-mask-help-popover'));
+  } finally {
+    await close();
+  }
+});
+
+test('a result refined before keeps its mask and the brush it was refined with', async () => {
+  const variant = { ...FRESH_VARIANT, visibilityMask: { base64Mask: 'c2F2ZWQ=', brushSize: 120, brushOpacity: 90, brushHardness: 70, brushSoftness: 30 } };
+  const { fills, readouts, close } = await mountEditor(variant);
+  try {
+    assert.equal(fills.includes('#000'), false, 'the saved mask is not wiped');
+    assert.deepEqual(readouts(), ['120px', '90%', '70%']);
+  } finally {
+    await close();
+  }
+});
+
+test('the wheel sizes the brush, Shift + wheel its core, and Ctrl + wheel still zooms', async () => {
+  const { React, container, readouts, wheel, close } = await mountEditor(FRESH_VARIANT);
+  const zoom = () => container.querySelector('.result-mask-zoom strong')!.textContent;
+  try {
+    let handled = true;
+    await React.act(async () => { handled = !wheel({ deltaY: -100 }); });
+    assert.equal(handled, true, 'the view does not scroll');
+    assert.deepEqual(readouts(), ['220px', '100%', '40%'], 'wheel up grows the brush');
+    await React.act(async () => { wheel({ deltaY: 100 }); wheel({ deltaY: 100 }); });
+    assert.equal(readouts()[0], '182px', 'wheel down shrinks it');
+    // With Shift held Chrome on Windows reports the wheel as horizontal.
+    await React.act(async () => { wheel({ deltaX: -100, shiftKey: true }); });
+    assert.deepEqual(readouts(), ['182px', '100%', '45%'], 'Shift + wheel up grows the core');
+    await React.act(async () => { wheel({ deltaY: 100, shiftKey: true }); wheel({ deltaY: 100, shiftKey: true }); });
+    assert.equal(readouts()[2], '35%');
+    assert.equal(zoom(), '100%');
+    await React.act(async () => { wheel({ deltaY: -100, ctrlKey: true }); });
+    assert.equal(zoom(), '115%');
+    assert.deepEqual(readouts(), ['182px', '100%', '35%'], 'zooming leaves the brush alone');
+  } finally {
+    await close();
+  }
+});
+
+test('the wheel still sizes the brush after coming back from Căn chỉnh', async () => {
+  const { React, button, readouts, wheel, settle, close } = await mountEditor(FRESH_VARIANT);
+  try {
+    await React.act(async () => { button('Căn chỉnh').click(); });
+    await React.act(async () => { button('Mask').click(); });
+    await settle();
+    await React.act(async () => { wheel({ deltaY: -100 }); });
+    assert.equal(readouts()[0], '220px');
+  } finally {
+    await close();
+  }
+});
+
+test('X switches the brush between restore and erase, even right after using a slider', async () => {
+  const { React, dom, container, button, close } = await mountEditor(FRESH_VARIANT);
+  const press = (target: EventTarget, init: object = {}) =>
+    target.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'x', code: 'KeyX', bubbles: true, ...init }));
+  const erasing = () => button('Xóa').classList.contains('active');
+  try {
+    await React.act(async () => { press(dom.window.document.body); });
+    assert.equal(erasing(), true);
+    const slider = container.querySelector('.result-mask-sliders input') as HTMLInputElement;
+    await React.act(async () => { press(slider); });
+    assert.equal(erasing(), false, 'a focused slider does not swallow X');
+    await React.act(async () => { press(dom.window.document.body, { ctrlKey: true }); });
+    assert.equal(erasing(), false, 'Ctrl+X is not the shortcut');
+  } finally {
+    await close();
+  }
+});
+
+test('the editor opens full screen and its button still shrinks it to the small popup', async () => {
+  const { React, container, close } = await mountEditor(FRESH_VARIANT);
+  const toggle = () => container.querySelector('.result-mask-header-actions button[aria-label$="popup"]') as HTMLButtonElement;
+  try {
+    assert.ok(container.querySelector('.result-mask-modal.fullscreen'), 'full screen at first');
+    assert.equal(toggle().getAttribute('aria-label'), 'Thu nhỏ popup');
+    await React.act(async () => { toggle().click(); });
+    assert.equal(container.querySelector('.result-mask-modal.fullscreen'), null);
+    assert.equal(toggle().getAttribute('aria-label'), 'Phóng to popup');
+  } finally {
+    await close();
+  }
+});
