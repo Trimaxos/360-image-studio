@@ -13,7 +13,7 @@ Tải `360-image-studio-package.zip` trong phần **Assets** tại [Releases](ht
 - Còn trống tối thiểu 10 GB ổ đĩa.
 - Đã bật Virtualization trong BIOS/UEFI.
 - Có kết nối Internet khi sử dụng AI cloud.
-- Có tài khoản ChatGPT dùng được Codex (gói trả phí), để dùng model AI mặc định.
+- Có tài khoản ChatGPT dùng được Codex (gói trả phí), khi dùng phương án AI ChatGPT trực tiếp hoặc 9router (mục 5).
 
 ## 2. Nội dung bộ cài
 
@@ -62,9 +62,21 @@ docker version
 docker compose version
 ```
 
-## 5. Cài Codex CLI và đăng nhập ChatGPT (model AI mặc định)
+## 5. Chuẩn bị phương án AI
 
-Model mặc định của ứng dụng là **GPT Image — ChatGPT trực tiếp**: tạo ảnh bằng hạn mức của tài khoản ChatGPT, không tốn tiền fal.ai. Ứng dụng dùng phiên đăng nhập ChatGPT của **Codex CLI** (chương trình dòng lệnh của OpenAI) trên chính máy Windows này. Chỉ đăng nhập ChatGPT trên trình duyệt là **chưa đủ**. Bỏ qua mục này nếu chỉ dùng model fal.ai.
+Ứng dụng có 3 phương án tạo ảnh. Trong ⚙ Settings chọn **một** phương án (mục 7); ô chọn model cạnh ô nhập prompt chỉ hiện model của phương án đó.
+
+| Phương án | Model hiện ở ô chọn model | Chi phí | Cần chuẩn bị |
+|---|---|---|---|
+| ChatGPT trực tiếp (mặc định) | GPT Image — ChatGPT trực tiếp | hạn mức tài khoản ChatGPT | Codex CLI và `codex login` (mục 5.1) |
+| 9router | GPT-6 Astra (Codex qua 9router — hạn mức ChatGPT) | hạn mức tài khoản ChatGPT kết nối trong 9router | 9router chạy trên máy này và API key (mục 5.2) |
+| fal.ai | GPT Image 2.5 Flare Edit (Medium) | tính tiền theo ảnh (~$0.013/ảnh) | key fal.ai (mục 5.3) |
+
+Chỉ cần chuẩn bị phương án sẽ dùng. Chuẩn bị nhiều phương án thì đổi qua lại trong ⚙ Settings lúc nào cũng được.
+
+### 5.1. ChatGPT trực tiếp: cài Codex CLI và đăng nhập ChatGPT
+
+Phương án mặc định, tạo ảnh bằng hạn mức của tài khoản ChatGPT, không tốn tiền fal.ai. Ứng dụng dùng phiên đăng nhập ChatGPT của **Codex CLI** (chương trình dòng lệnh của OpenAI) trên chính máy Windows này. Chỉ đăng nhập ChatGPT trên trình duyệt là **chưa đủ**.
 
 1. Cài Node.js bản LTS (18 trở lên) từ [nodejs.org](https://nodejs.org), giữ các tùy chọn mặc định. Kiểm tra trong PowerShell:
 
@@ -106,7 +118,37 @@ Cập nhật Codex CLI lên bản mới:
 npm install -g @openai/codex@latest
 ```
 
-9router không còn cần cho ứng dụng: các model 9router đang tạm ẩn vì OpenAI thay đổi cách tạo ảnh, 9router chưa hỗ trợ.
+### 5.2. 9router: GPT-6 Astra
+
+9router là một chương trình chạy trên chính máy Windows này (cổng `20128`), không nằm trong Docker. Nó tạo ảnh bằng tài khoản ChatGPT kết nối trong trang quản lý 9router; kết nối nhiều tài khoản thì một tài khoản hết hạn mức, 9router tự chuyển sang tài khoản kế tiếp.
+
+1. Cài Node.js như bước 1 của mục 5.1 nếu máy chưa có.
+2. Cài 9router:
+
+   ```powershell
+   npm install -g 9router
+   ```
+
+3. Chạy 9router:
+
+   ```powershell
+   9router
+   ```
+
+   Trình duyệt tự mở trang quản lý `http://localhost:20128/dashboard`. **Giữ cửa sổ PowerShell này mở** trong lúc dùng ứng dụng; đóng cửa sổ là 9router dừng.
+
+4. Trên trang quản lý, vào **Providers** → kết nối **Codex** → đăng nhập bằng tài khoản ChatGPT do quản trị viên cung cấp.
+5. Tạo hoặc sao chép **API Key** trên trang quản lý (dạng `sk-...`), dùng ở mục 7 (nhập trong ⚙ Settings).
+
+Cập nhật 9router lên bản mới:
+
+```powershell
+npm install -g 9router@latest
+```
+
+### 5.3. fal.ai
+
+Không cần cài thêm gì, chỉ cần **key fal.ai** do quản trị viên cung cấp, nhập ở mục 7. Mỗi ảnh tạo ra được tính tiền trên tài khoản fal.ai.
 
 ## 6. Tạo cấu hình môi trường
 
@@ -162,14 +204,23 @@ Hoặc nhập vào trình duyệt:
 http://localhost:3001
 ```
 
-Model mặc định **GPT Image — ChatGPT trực tiếp** không cần nhập key, chỉ cần đã đăng nhập Codex CLI (mục 5). Kiểm tra nhanh: mở một ảnh, chọn vùng, nhập prompt rồi bấm **Generate**. Sau khoảng 15–30 giây phải có kết quả.
+Chọn phương án AI: bấm nút **⚙ Settings** trên thanh trên cùng.
 
-Chỉ cần ⚙ Settings khi dùng model fal.ai. Bấm nút **⚙ Settings** trên thanh trên cùng, điền rồi bấm **Lưu**.
+1. Ở khung **Model AI hiện ở ô chọn model**, chọn một trong ba:
+   - `ChatGPT trực tiếp (đăng nhập Codex CLI)`: mặc định khi chưa chọn gì.
+   - `9router — GPT-6 Astra`
+   - `fal.ai — tính tiền theo ảnh`
+2. Điền phần cấu hình của phương án đã chọn (các phần khác để nguyên):
+   - **ChatGPT trực tiếp**: không cần nhập gì. Dòng chữ trong phần này phải là `Đã đăng nhập Codex CLI trên máy này.`; nếu báo chưa đăng nhập thì làm mục 5.1, rồi đóng và mở lại Settings.
+   - **9router**: `URL 9router` giữ nguyên giá trị có sẵn khi 9router chạy trên chính máy này; `API key 9router` là API Key lấy ở mục 5.2.
+   - **fal.ai**: `Key fal.ai` do quản trị viên cung cấp.
+3. Bấm **Lưu**.
 
-- `Key fal.ai`: dùng cho model GPT Image 2.5 Flare Edit (Medium) của fal.ai (tính tiền theo ảnh). Để trống thì không dùng được model này.
-- `URL 9router`, `API key 9router`: để nguyên hoặc để trống, các model 9router đang tạm ẩn.
+Ô chọn model cạnh ô nhập prompt giờ chỉ hiện model của phương án đã chọn. Muốn đổi phương án: mở lại ⚙ Settings, chọn phương án khác rồi bấm **Lưu**; các key đã nhập vẫn được giữ.
 
-Chỉ cần nhập một lần: tắt mở lại máy hay cập nhật phiên bản mới (mục 10) đều không phải nhập lại. Bấm Generate khi model đang chọn chưa có key, ứng dụng sẽ nhắc mở Settings.
+Kiểm tra nhanh: mở một ảnh, chọn vùng, nhập prompt rồi bấm **Generate**. ChatGPT trực tiếp thường có kết quả sau 15–30 giây, 9router Astra sau khoảng 20–50 giây.
+
+Chỉ cần nhập một lần: tắt mở lại máy hay cập nhật phiên bản mới (mục 10) đều không phải nhập lại, kể cả phương án đã chọn. Bấm Generate khi phương án 9router hoặc fal.ai chưa có key, ứng dụng sẽ nhắc mở Settings.
 
 ## 8. Sử dụng hằng ngày
 
@@ -177,9 +228,12 @@ Thông thường chỉ cần:
 
 1. Mở Docker Desktop.
 2. Chờ Docker Engine khởi động.
-3. Mở `http://localhost:3001`.
+3. Chỉ khi dùng phương án 9router: mở PowerShell, chạy `9router` và giữ cửa sổ đó mở.
+4. Mở `http://localhost:3001`.
 
 Nếu Generate báo **chưa đăng nhập Codex CLI** hoặc **đăng nhập đã hết hạn**: mở PowerShell, chạy `codex login`, đăng nhập lại rồi bấm Generate lần nữa (không cần khởi động lại ứng dụng).
+
+Nếu Generate báo lỗi kết nối 9router (`fetch failed`, `ECONNREFUSED`): kiểm tra cửa sổ 9router còn chạy và mở được `http://localhost:20128/dashboard`.
 
 Nếu ứng dụng chưa chạy:
 
@@ -212,7 +266,7 @@ docker compose restart
 
 1. Nhận file `360-image-studio.tar` và `compose.yaml` phiên bản mới từ quản trị viên.
 2. Chép đè các file cũ trong thư mục bộ cài (giữ nguyên file `.env`).
-3. Nếu máy chưa cài Codex CLI: làm mục 5 trước.
+3. Nếu phương án AI định dùng chưa được chuẩn bị trên máy này: làm phần tương ứng ở mục 5 trước.
 4. Chạy:
 
 ```powershell
@@ -222,7 +276,7 @@ docker load -i 360-image-studio.tar
 docker compose up -d
 ```
 
-Dữ liệu trong Docker volume vẫn được giữ khi cập nhật.
+Dữ liệu trong Docker volume vẫn được giữ khi cập nhật. Sau khi cập nhật, mở ⚙ Settings kiểm tra phương án AI đang chọn (máy chưa chọn bao giờ thì là ChatGPT trực tiếp).
 
 ## 11. Kiểm tra và xử lý lỗi
 
@@ -266,6 +320,15 @@ Nếu Generate với model ChatGPT báo lỗi:
 - `ChatGPT error: 429`: tài khoản đã dùng hết hạn mức tạo ảnh, chờ hạn mức hồi lại hoặc đổi tài khoản bằng `codex login`.
 - Đã đăng nhập mà vẫn báo chưa đăng nhập: kiểm tra `codex login status` và có file `%USERPROFILE%\.codex\auth.json`, kiểm tra thư mục bộ cài dùng `compose.yaml` bản mới (có dòng `.codex:/codex`), rồi chạy `docker compose up -d` trong thư mục bộ cài.
 
+Nếu Generate với model 9router báo lỗi:
+
+- `Chưa nhập API key 9router`: nhập API Key (mục 5.2) trong ⚙ Settings.
+- `fetch failed` hoặc `ECONNREFUSED`: 9router chưa chạy, chạy `9router` (mục 5.2) rồi bấm Generate lại.
+- `All accounts unavailable`: mọi tài khoản ChatGPT kết nối trong 9router đều đang lỗi hoặc hết hạn mức. Chờ hạn mức hồi lại, hoặc kết nối thêm tài khoản trong trang quản lý 9router.
+- Các lỗi `9router error: …` khác (ví dụ `503`): thường là lỗi tạm, bấm Generate lại. Lỗi lặp lại thì cập nhật 9router lên bản mới (mục 5.2), hoặc tạm chuyển sang phương án ChatGPT trực tiếp trong ⚙ Settings.
+
+Không thấy model mong muốn ở ô chọn model: mở ⚙ Settings, chọn đúng phương án rồi bấm **Lưu**. Ô chọn model chỉ hiện model của phương án đang chọn.
+
 Gửi kết quả `docker compose ps` và `docker compose logs --tail=100` cho quản trị viên nếu không tự xử lý được.
 
 ## 12. Bảo vệ dữ liệu
@@ -276,6 +339,6 @@ Không chạy lệnh sau nếu chưa được quản trị viên xác nhận:
 docker compose down -v
 ```
 
-Tùy chọn `-v` xóa Docker volume chứa cache, dữ liệu cục bộ và các key đã nhập trong ⚙ Settings.
+Tùy chọn `-v` xóa Docker volume chứa cache, dữ liệu cục bộ và cấu hình đã lưu trong ⚙ Settings (phương án AI, URL, key).
 
 Nên dùng chức năng **Download Project** thường xuyên. Docker volume không thay thế file project sao lưu; nếu Windows hoặc ổ đĩa hỏng, dữ liệu trong volume vẫn có thể mất.

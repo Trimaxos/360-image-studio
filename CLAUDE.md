@@ -41,4 +41,4 @@ Không đưa toàn bộ ảnh 8K vào AI. Workflow: Mask → Crop Tile (1024×10
 | Mask Editor | Fabric.js / Konva.js |
 | Backend | Node.js + Express |
 | Image Processing | Sharp + libvips + OpenCV |
-| Cloud AI | fal.ai |
+| Cloud AI | Chọn 1 trong ⚙ Settings: ChatGPT trực tiếp (đăng nhập Codex CLI, mặc định), 9router (GPT-6 Astra), fal.ai |
