@@ -328,13 +328,13 @@ class FalProvider implements AiProvider {
   }
 }
 
-// Codex through the local 9router gateway: the OpenAI Responses API with the
-// image_generation tool. There is no mask input, so a drawn region only reaches
-// the model through the prompt (the client blends the result back afterwards).
-// cx/gpt-image-* models use the Images API (/images/generations) instead, which
-// only honors the three standard sizes below.
+// Codex through the local 9router gateway, always via its Images API (/images/generations), which only honors the
+// three standard sizes below. Since November 2026 Codex turns down the Responses API with the image_generation tool
+// ("Complexity 'low' is not supported for this image model"), and so the cx/gpt-image-* models, which 9router sends
+// with a reasoning effort; Astra goes without one (9router sends it with reasoning: null) and still returns images.
+// There is no mask input, so a drawn region only reaches the model through the prompt (the client blends the result
+// back afterwards).
 const NINEROUTER_ASPECT_TOLERANCE = 0.02;
-const NINEROUTER_IMAGES_API_MODEL = /^cx\/gpt-image-/;
 
 export function pickGptImageSize(width: number, height: number): { width: number; height: number } {
   const ratio = width / height;
@@ -361,7 +361,8 @@ class NineRouterProvider implements AiProvider {
     private isRegionEdit?: boolean,
     private extraParams?: Record<string, string | number | boolean>,
   ) {}
-  private async editViaImagesApi(base64Image: string, prompt: string) {
+  async edit(base64Image: string, _base64Mask: string, prompt: string) {
+    if (!config.ninerouterKey) throw new Error('Chưa nhập API key 9router — mở ⚙ Settings để nhập.');
     const sourceImage = Buffer.from(base64Image, 'base64');
     const sourceMetadata = await sharp(sourceImage).metadata();
     const size = pickGptImageSize(sourceMetadata.width!, sourceMetadata.height!);
@@ -385,43 +386,6 @@ class NineRouterProvider implements AiProvider {
     const b64 = data.data?.[0]?.b64_json;
     if (!b64) throw new Error('9router không trả ảnh');
     const normalized = await fitStandardSizeResult(sourceImage, size, Buffer.from(b64, 'base64'));
-    return { base64Result: normalized.toString('base64'), model: this.modelId };
-  }
-  async edit(base64Image: string, _base64Mask: string, prompt: string) {
-    if (!config.ninerouterKey) throw new Error('Chưa nhập API key 9router — mở ⚙ Settings để nhập.');
-    if (NINEROUTER_IMAGES_API_MODEL.test(this.modelId)) return this.editViaImagesApi(base64Image, prompt);
-    const sourceImage = Buffer.from(base64Image, 'base64');
-    const editRequest = this.isRegionEdit ? buildRegionEditPrompt(prompt) : buildPreservationPrompt(prompt);
-    const response = await fetch(`${config.ninerouterBaseUrl.replace(/\/+$/, '')}/responses`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${config.ninerouterKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: this.modelId,
-        stream: false,
-        input: [{ role: 'user', content: [
-          { type: 'input_text', text: `${editRequest} Return only the edited image.` },
-          { type: 'input_image', image_url: await toRequestDataUri(base64Image) },
-        ] }],
-        tools: [{ type: 'image_generation' }],
-      }),
-      signal: AbortSignal.timeout(280_000),
-    });
-    if (!response.ok) throw new Error(`9router error: ${response.status} ${(await response.text()).slice(0, 400)}`);
-    const data = await response.json() as any;
-    const output: any[] = data.output ?? [];
-    const generated = output.find((item) => item.type === 'image_generation_call' && item.result);
-    if (!generated) {
-      const text = output.filter((item) => item.type === 'message')
-        .flatMap((item) => item.content ?? []).map((part: any) => part.text).filter(Boolean).join(' ');
-      throw new Error(`9router không trả ảnh${text ? `: ${text.slice(0, 300)}` : ''}`);
-    }
-    const resultBuffer = Buffer.from(generated.result, 'base64');
-    const [source, result] = await Promise.all([sharp(sourceImage).metadata(), sharp(resultBuffer).metadata()]);
-    const drift = Math.abs((result.width! / result.height!) / (source.width! / source.height!) - 1);
-    if (drift > NINEROUTER_ASPECT_TOLERANCE) {
-      throw new Error(`Model trả ảnh sai tỉ lệ: ${result.width}×${result.height}; crop là ${source.width}×${source.height}. Hãy thử lại.`);
-    }
-    const normalized = await normalizeResultToSourceDimensions(sourceImage, resultBuffer);
     return { base64Result: normalized.toString('base64'), model: this.modelId };
   }
 }

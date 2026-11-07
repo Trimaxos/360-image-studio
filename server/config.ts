@@ -1,10 +1,13 @@
 import os from 'os';
 import path from 'path';
 import dotenv from 'dotenv';
+import type { AiProviderName } from '../shared/types';
 dotenv.config();
 
 // URL and keys below start from .env; values saved on the Settings screen replace them (see settings.ts).
 export const config = {
+  // The AI service whose models the prompt bar offers, chosen on the Settings screen
+  aiProvider: 'chatgpt' as AiProviderName,
   port: parseInt(process.env.PORT || '3001', 10),
   // Where /api/project/save-to-folder writes projects (the browser automation has no file dialog)
   projectsDir: path.resolve(process.env.PROJECTS_DIR || 'assets/output/projects'),

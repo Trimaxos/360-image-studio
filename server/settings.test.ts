@@ -19,6 +19,8 @@ beforeEach(async () => {
   config.ninerouterBaseUrl = 'http://env-gateway:20128/v1';
   config.ninerouterKey = 'env-ninerouter-key';
   config.falAiKey = '';
+  config.aiProvider = 'chatgpt';
+  config.codexAuthFile = path.join(dir, 'codex', 'auth.json');
 });
 
 afterEach(async () => {
@@ -48,8 +50,33 @@ test('no saved file leaves the .env values as they are', () => {
 test('the status shows only the end of each key, never the key itself', async () => {
   await saveSettings({ ninerouterKey: 'sk-secret-9router-abcd' });
   const status = settingsStatus();
-  assert.deepEqual(status, { ninerouterBaseUrl: 'http://env-gateway:20128/v1', ninerouterKey: '…abcd', falAiKey: null });
+  assert.deepEqual(status, {
+    aiProvider: 'chatgpt', chatgptSignedIn: false,
+    ninerouterBaseUrl: 'http://env-gateway:20128/v1', ninerouterKey: '…abcd', falAiKey: null,
+  });
   assert.doesNotMatch(JSON.stringify(status), /secret/);
+});
+
+test('the prompt bar offers ChatGPT until another AI service is chosen, and the choice survives a restart', async () => {
+  assert.equal(settingsStatus().aiProvider, 'chatgpt');
+  await saveSettings({ aiProvider: 'ninerouter' });
+  assert.equal(settingsStatus().aiProvider, 'ninerouter');
+  config.aiProvider = 'chatgpt';
+  applySavedSettings();
+  assert.equal(config.aiProvider, 'ninerouter');
+});
+
+test('an unknown AI service is refused and nothing is saved', async () => {
+  await assert.rejects(saveSettings({ aiProvider: 'midjourney' as any }), /Phương án AI không hợp lệ/);
+  assert.equal(config.aiProvider, 'chatgpt');
+  await assert.rejects(fs.access(config.settingsFile));
+});
+
+test('the status says whether this computer has a Codex CLI login', async () => {
+  assert.equal(settingsStatus().chatgptSignedIn, false);
+  await fs.mkdir(path.dirname(config.codexAuthFile), { recursive: true });
+  await fs.writeFile(config.codexAuthFile, JSON.stringify({ tokens: { access_token: 'a.b.c', refresh_token: 'r', account_id: 'acct' } }));
+  assert.equal(settingsStatus().chatgptSignedIn, true);
 });
 
 test('an empty key field keeps the key already there', async () => {

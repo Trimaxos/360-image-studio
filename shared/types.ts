@@ -277,6 +277,10 @@ export interface AiEditResponse {
 
 /** What the Settings screen shows. Keys never leave the server: only their last characters, or null when none is set. */
 export interface SettingsStatus {
+  /** The AI service whose models the prompt bar offers. */
+  aiProvider: AiProviderName;
+  /** This computer has a Codex CLI login, which the ChatGPT model signs in with. */
+  chatgptSignedIn: boolean;
   ninerouterBaseUrl: string;
   ninerouterKey: string | null;
   falAiKey: string | null;
@@ -284,6 +288,7 @@ export interface SettingsStatus {
 
 /** Fields left out (or keys left empty) keep their current value. */
 export interface SettingsUpdate {
+  aiProvider?: AiProviderName;
   ninerouterBaseUrl?: string;
   ninerouterKey?: string;
   falAiKey?: string;

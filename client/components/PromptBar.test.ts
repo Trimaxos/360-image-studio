@@ -149,6 +149,60 @@ test('the model picked at first is one whose service already has a key', async (
   }
 });
 
+async function mountModelPicker(t: any, aiProvider: string) {
+  const { JSDOM } = await importUnsafe('jsdom');
+  const dom = new JSDOM('<!doctype html><html><body></body></html>', { pretendToBeVisual: true });
+  setupDom(dom);
+  const { createRoot } = await importUnsafe('react-dom/client');
+  const { useProjectStore } = await importUnsafe('../stores/project');
+  const { useSettingsStore } = await importUnsafe('../stores/settings');
+  const { api } = await importUnsafe('../lib/api');
+  const PromptBar = (await importUnsafe('./PromptBar')).default;
+  const status = { aiProvider, chatgptSignedIn: true, ...withKeys };
+  useSettingsStore.setState({ status: null, open: false });
+  t.mock.method(api.settings, 'get', async () => status);
+  t.mock.method(api.ai, 'models', async () => ({ groups: [
+    { provider: 'chatgpt', label: 'ChatGPT', models: [{ id: 'gpt-image-2', provider: 'chatgpt', displayName: 'GPT Image', enabled: true }] },
+    { provider: 'ninerouter', label: '9router', models: [{ id: 'cx/gpt-6-astra', provider: 'ninerouter', displayName: 'Astra', enabled: true }] },
+    { provider: 'fal', label: 'fal.ai', models: [{ id: 'fal-flare', provider: 'fal', displayName: 'Flare', enabled: true }] },
+  ] }));
+  useProjectStore.getState().reset();
+  useProjectStore.setState({ selectedModel: null });
+  const container = dom.window.document.createElement('div');
+  dom.window.document.body.appendChild(container);
+  const root = createRoot(container);
+  const settle = async () => { for (let i = 0; i < 12; i += 1) await act(async () => { await new Promise((resolve) => setImmediate(resolve)); }); };
+  await act(async () => root.render(createElement(PromptBar)));
+  await settle();
+  const options = () => Array.from(container.querySelectorAll('select[aria-label="Model"] option'))
+    .map((option: any) => option.value).filter(Boolean);
+  const close = async () => { await act(async () => root.unmount()); dom.window.close(); };
+  return { options, settle, close, projectStore: useProjectStore, settingsStore: useSettingsStore, status };
+}
+
+test('the model list offers only the AI service chosen in Settings', async (t) => {
+  const { options, projectStore, close } = await mountModelPicker(t, 'ninerouter');
+  try {
+    assert.deepEqual(options(), ['ninerouter:cx/gpt-6-astra']);
+    assert.equal(projectStore.getState().selectedModel?.id, 'cx/gpt-6-astra');
+  } finally {
+    await close();
+  }
+});
+
+test('choosing another AI service in Settings switches the model list and the picked model', async (t) => {
+  const { options, settle, projectStore, settingsStore, status, close } = await mountModelPicker(t, 'chatgpt');
+  try {
+    assert.equal(projectStore.getState().selectedModel?.id, 'gpt-image-2');
+    await act(async () => settingsStore.getState().setStatus({ ...status, aiProvider: 'fal' }));
+    await settle();
+    assert.deepEqual(options(), ['fal:fal-flare']);
+    assert.equal(projectStore.getState().selectedModel?.id, 'fal-flare');
+  } finally {
+    await close();
+  }
+});
+
 test('Generate starts a generation of the open layer without putting the whole app in a generating state', async (t) => {
   const { store, generate, input, first, edits, settle, close } = await mountOpenLayer(t);
   try {

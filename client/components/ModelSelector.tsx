@@ -9,24 +9,35 @@ export default function ModelSelector({ disabled }: { disabled: boolean }) {
   const [error, setError] = useState('');
   const selected = useProjectStore((state) => state.selectedModel);
   const setSelected = useProjectStore((state) => state.setSelectedModel);
+  const aiProvider = useSettingsStore((state) => state.status?.aiProvider);
 
   const load = async () => {
     setError('');
     try {
       const [result] = await Promise.all([api.ai.models(), useSettingsStore.getState().load()]);
       setCatalog(result);
-      // The first model whose service already has a key, else the first one (Generate then asks for the key).
-      const status = useSettingsStore.getState().status;
-      const enabled = result.groups.flatMap((group) => group.models).filter((model) => model.enabled);
-      const first = enabled.find((model) => hasKeyFor(status, model.provider)) ?? enabled[0];
-      if (!useProjectStore.getState().selectedModel && first) setSelected(first);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Không tải được model');
     }
   };
   useEffect(() => { void load(); }, []);
 
-  const models = catalog?.groups.flatMap((group) => group.models) ?? [];
+  // Only the AI service chosen on the Settings screen is offered (every one while the settings are unknown).
+  const groups = catalog?.groups.filter((group) => !aiProvider || group.provider === aiProvider) ?? [];
+  const models = groups.flatMap((group) => group.models);
+
+  // A picked model of another service gives way to the first one offered: the first whose service already has a key,
+  // else the first one (Generate then asks for the key).
+  useEffect(() => {
+    if (!catalog) return;
+    const current = useProjectStore.getState().selectedModel;
+    if (current && models.some((model) => model.provider === current.provider && model.id === current.id)) return;
+    const status = useSettingsStore.getState().status;
+    const enabled = models.filter((model) => model.enabled);
+    setSelected(enabled.find((model) => hasKeyFor(status, model.provider)) ?? enabled[0] ?? null);
+  }, [catalog, aiProvider]);
+
+  const catalogError = groups.some((group) => group.provider === 'fal') ? catalog?.errors?.fal : undefined;
   return (
     <div className="model-selector-wrap">
       <select
@@ -39,7 +50,7 @@ export default function ModelSelector({ disabled }: { disabled: boolean }) {
         }}
       >
         {!selected && <option value="">Model</option>}
-        {catalog?.groups.map((group) => (
+        {groups.map((group) => (
           <optgroup key={group.provider} label={group.label}>
             {group.models.map((model) => (
               <option key={model.id} value={`${model.provider}:${model.id}`} disabled={!model.enabled}>
@@ -51,8 +62,8 @@ export default function ModelSelector({ disabled }: { disabled: boolean }) {
           </optgroup>
         ))}
       </select>
-      {(error || catalog?.errors?.fal) && (
-        <button className="model-retry" onClick={() => void load()} title={error || catalog?.errors?.fal}>Retry</button>
+      {(error || catalogError) && (
+        <button className="model-retry" onClick={() => void load()} title={error || catalogError}>Retry</button>
       )}
     </div>
   );

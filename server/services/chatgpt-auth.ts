@@ -23,6 +23,16 @@ function readAuth(): any {
   return auth;
 }
 
+/** This computer has a Codex CLI login; an expired one counts too, it is renewed on Generate. */
+export function chatgptSignedIn(): boolean {
+  try {
+    readAuth();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function expiresAt(jwt: string): number {
   try {
     return JSON.parse(Buffer.from(jwt.split('.')[1], 'base64url').toString()).exp * 1000;

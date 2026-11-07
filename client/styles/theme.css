@@ -778,6 +778,36 @@ html, body, #root {
 .settings-dialog .modal-row label {
   width: 110px;
 }
+.settings-providers {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+}
+.settings-providers legend {
+  padding: 0 4px;
+  color: var(--text2);
+  font-size: 12px;
+}
+.settings-providers label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.settings-providers input {
+  accent-color: var(--accent);
+}
+.settings-section {
+  margin: 16px 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
 .modal-note {
   font-size: 12px;
   color: var(--text2);

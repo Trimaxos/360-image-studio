@@ -206,23 +206,11 @@ async function falOptions(): Promise<AiModelOption[]> {
 
 // ===== 9router (Codex via ChatGPT account) =====
 
-// cx/gpt-image-* edits through the Images API (/images/generations); cx/gpt-6-astra
-// returns an image through the Responses image_generation tool, and the other
-// cx/* models answer "no image-editing tool is available". Neither is listed
-// by /models, so they are declared here.
+// Only Astra still returns images, through 9router's Images API (see NineRouterProvider); cx/gpt-image-* models
+// always answer 502 since November 2026. Astra is not listed by /models, so it is declared here.
 // Offered even without a key: Generate then asks for it on the Settings screen.
 export function ninerouterOptions(): AiModelOption[] {
   return [{
-    id: 'cx/gpt-image-2.5-flare',
-    displayName: 'GPT Image 2.5 Flare (High) — 9router',
-    provider: 'ninerouter',
-    capabilities: ['image-edit'],
-    enabled: true,
-    hasMask: false,
-    maskRequired: false,
-    supportsReferenceImages: false,
-    extraParams: { quality: 'high' },
-  }, {
     id: 'cx/gpt-6-astra',
     displayName: 'GPT-6 Astra (Codex qua 9router — hạn mức ChatGPT)',
     provider: 'ninerouter',
@@ -231,6 +219,7 @@ export function ninerouterOptions(): AiModelOption[] {
     hasMask: false,
     maskRequired: false,
     supportsReferenceImages: false,
+    extraParams: { quality: 'high' },
   }];
 }
 
@@ -251,10 +240,6 @@ export function chatgptOptions(): AiModelOption[] {
   }];
 }
 
-// Since November 2026 OpenAI turned down every image 9router asks Codex for ("Complexity 'low' is not supported for
-// this image model"), so its models are hidden, not removed: set this back to true once a 9router update fixes it.
-const SHOW_NINEROUTER_MODELS = false;
-
 // ===== Public API =====
 
 export async function getModelInfo(modelId: string): Promise<AiModelOption | undefined> {
@@ -274,11 +259,10 @@ export async function getModelCatalog(): Promise<ModelCatalogResponse> {
   } catch (error) {
     errors.fal = error instanceof Error ? error.message : 'Không tải được fal.ai catalog';
   }
-  const ninerouter = SHOW_NINEROUTER_MODELS ? ninerouterOptions() : [];
-  // ChatGPT first: the model selector defaults to the first enabled model.
+  // Every service is listed: the prompt bar offers only the one chosen on the Settings screen.
   const groups: ModelCatalogResponse['groups'] = [
     { provider: 'chatgpt', label: 'ChatGPT', models: chatgptOptions() },
-    ...(ninerouter.length ? [{ provider: 'ninerouter' as const, label: '9router', models: ninerouter }] : []),
+    { provider: 'ninerouter', label: '9router', models: ninerouterOptions() },
     { provider: 'fal', label: 'fal.ai', models: fal },
   ];
   return { groups, errors };

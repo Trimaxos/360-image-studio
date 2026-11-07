@@ -1,12 +1,15 @@
 import fs from 'fs';
 import path from 'path';
 import { config } from './config';
-import type { SettingsStatus, SettingsUpdate } from '../shared/types';
+import { chatgptSignedIn } from './services/chatgpt-auth';
+import type { AiProviderName, SettingsStatus, SettingsUpdate } from '../shared/types';
 
 /** A value the person typed that cannot be used; the route answers 400 with its message. */
 export class SettingsInputError extends Error {}
 
 const FIELDS = ['ninerouterBaseUrl', 'ninerouterKey', 'falAiKey'] as const;
+const AI_PROVIDERS: AiProviderName[] = ['chatgpt', 'ninerouter', 'fal'];
+const isAiProvider = (value: unknown): value is AiProviderName => AI_PROVIDERS.includes(value as AiProviderName);
 
 function readSaved(): SettingsUpdate {
   try {
@@ -23,10 +26,15 @@ export function applySavedSettings(): void {
   for (const field of FIELDS) {
     if (typeof saved[field] === 'string') config[field] = saved[field];
   }
+  if (isAiProvider(saved.aiProvider)) config.aiProvider = saved.aiProvider;
 }
 
 function cleanUpdate(update: SettingsUpdate): SettingsUpdate {
   const changes: SettingsUpdate = {};
+  if (update.aiProvider !== undefined) {
+    if (!isAiProvider(update.aiProvider)) throw new SettingsInputError('Phương án AI không hợp lệ.');
+    changes.aiProvider = update.aiProvider;
+  }
   if (typeof update.ninerouterBaseUrl === 'string') {
     const url = update.ninerouterBaseUrl.trim();
     let protocol = '';
@@ -59,6 +67,8 @@ const keyHint = (key: string) => (key ? `…${key.length >= 8 ? key.slice(-4) : 
 
 export function settingsStatus(): SettingsStatus {
   return {
+    aiProvider: config.aiProvider,
+    chatgptSignedIn: chatgptSignedIn(),
     ninerouterBaseUrl: config.ninerouterBaseUrl,
     ninerouterKey: keyHint(config.ninerouterKey),
     falAiKey: keyHint(config.falAiKey),

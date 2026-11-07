@@ -98,21 +98,19 @@ test('text to image model is omitted', () => {
 });
 
 
-test('9router models are offered even without a key (Generate asks for it), Flare first', (t) => {
+test('9router offers only Astra at high quality, even without a key (Generate asks for it)', (t) => {
   const old = config.ninerouterKey;
   t.after(() => { config.ninerouterKey = old; });
   config.ninerouterKey = '';
   const models = ninerouterOptions();
-  assert.deepEqual(models.map((m) => m.id), ['cx/gpt-image-2.5-flare', 'cx/gpt-6-astra']);
-  const [flare] = models;
-  assert.equal(flare.extraParams?.quality, 'high');
-  for (const model of models) {
-    assert.equal(model.provider, 'ninerouter');
-    assert.equal(model.enabled, true);
-    assert.equal(model.hasMask, false);
-    assert.equal(model.supportsReferenceImages, false);
-    assert.ok(model.capabilities.includes('image-edit'));
-  }
+  assert.deepEqual(models.map((m) => m.id), ['cx/gpt-6-astra']);
+  const [astra] = models;
+  assert.equal(astra.extraParams?.quality, 'high');
+  assert.equal(astra.provider, 'ninerouter');
+  assert.equal(astra.enabled, true);
+  assert.equal(astra.hasMask, false);
+  assert.equal(astra.supportsReferenceImages, false);
+  assert.ok(astra.capabilities.includes('image-edit'));
 });
 
 test('ChatGPT offers one image model, which needs no key (the Codex CLI login is checked on Generate)', () => {
@@ -126,7 +124,7 @@ test('ChatGPT offers one image model, which needs no key (the Codex CLI login is
   assert.ok(model.capabilities.includes('image-edit'));
 });
 
-test('catalog lists ChatGPT first, hides 9router (it returns no images) and fal only offers Flare Medium', async (t) => {
+test('catalog lists every service (the prompt bar shows the one chosen in Settings) and fal only offers Flare Medium', async (t) => {
   const old = config.ninerouterKey;
   t.after(() => { config.ninerouterKey = old; });
   config.ninerouterKey = 'nr-key';
@@ -136,8 +134,9 @@ test('catalog lists ChatGPT first, hides 9router (it returns no images) and fal 
     ...editSchemaWithImageSize({ type: 'string', enum: ['auto'] }),
   }] }));
   const { groups } = await getModelCatalog();
-  assert.deepEqual(groups.map((group) => group.provider), ['chatgpt', 'fal']);
+  assert.deepEqual(groups.map((group) => group.provider), ['chatgpt', 'ninerouter', 'fal']);
   assert.deepEqual(groups[0].models.map((m) => m.id), ['gpt-image-2']);
+  assert.deepEqual(groups[1].models.map((m) => m.id), ['cx/gpt-6-astra']);
   const fal = groups.find((group) => group.provider === 'fal');
   assert.deepEqual(fal?.models.map((m) => m.id), ['openai/gpt-image-2.5/flare/edit::medium']);
   assert.equal(fal?.models[0].endpointId, 'openai/gpt-image-2.5/flare/edit');

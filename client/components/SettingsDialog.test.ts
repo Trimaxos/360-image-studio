@@ -5,7 +5,9 @@ import { setupDom } from '../test-utils/dom';
 
 async function importUnsafe(specifier: string): Promise<any> { return import(specifier); }
 
-const saved = { ninerouterBaseUrl: 'http://gateway/v1', ninerouterKey: '…abcd', falAiKey: null };
+const saved = {
+  aiProvider: 'chatgpt', chatgptSignedIn: true, ninerouterBaseUrl: 'http://gateway/v1', ninerouterKey: '…abcd', falAiKey: null,
+};
 
 async function mountDialog(t: any) {
   const { JSDOM } = await importUnsafe('jsdom');
@@ -63,6 +65,30 @@ test('Save sends only what was changed, then closes with the new status', async 
     assert.equal(store.getState().open, false);
     assert.equal(store.getState().status.falAiKey, '…9876');
     assert.equal(container.querySelector('[role=dialog]'), null);
+  } finally {
+    await close();
+  }
+});
+
+test('Settings shows which AI service the prompt bar offers and whether Codex CLI is signed in', async (t) => {
+  const { container, close } = await mountDialog(t);
+  try {
+    const radios = Array.from(container.querySelectorAll('input[name="ai-provider"]')) as HTMLInputElement[];
+    assert.deepEqual(radios.map((radio) => radio.value), ['chatgpt', 'ninerouter', 'fal']);
+    assert.deepEqual(radios.filter((radio) => radio.checked).map((radio) => radio.value), ['chatgpt']);
+    assert.match(container.textContent!, /Đã đăng nhập Codex CLI/);
+  } finally {
+    await close();
+  }
+});
+
+test('choosing another AI service saves it, and only it, for the prompt bar', async (t) => {
+  const { container, button, sent, store, close } = await mountDialog(t);
+  try {
+    await act(async () => (container.querySelector('input[name="ai-provider"][value="ninerouter"]') as HTMLInputElement).click());
+    await act(async () => button('Lưu').click());
+    assert.deepEqual(sent, [{ aiProvider: 'ninerouter' }]);
+    assert.equal(store.getState().status.aiProvider, 'ninerouter');
   } finally {
     await close();
   }

@@ -226,65 +226,6 @@ async function solidPng(width: number, height: number) {
   return sharp({ create: { width, height, channels: 3, background: '#888' } }).png().toBuffer();
 }
 
-test('ninerouter provider asks /responses for an image and resizes it to the source crop', async (t) => {
-  const old = { key: config.ninerouterKey, url: config.ninerouterBaseUrl };
-  config.ninerouterKey = 'nr-key';
-  config.ninerouterBaseUrl = 'http://gateway.invalid/v1/';
-  t.after(() => { config.ninerouterKey = old.key; config.ninerouterBaseUrl = old.url; });
-  const source = await solidPng(400, 400);
-  const generated = await solidPng(512, 512);
-  const calls: Array<{ url: string; headers: Record<string, string>; body: any }> = [];
-  t.mock.method(globalThis, 'fetch', async (url: unknown, options?: RequestInit) => {
-    calls.push({ url: String(url), headers: options?.headers as Record<string, string>, body: JSON.parse(options?.body as string) });
-    return Response.json({ output: [
-      { type: 'reasoning' },
-      { type: 'image_generation_call', status: 'completed', result: generated.toString('base64') },
-    ] });
-  });
-  const provider = getProviderFor('ninerouter', 'cx/gpt-6-astra');
-  assert.equal(provider.name, 'ninerouter');
-  const result = await provider.edit(source.toString('base64'), '', 'make the sky blue');
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, 'http://gateway.invalid/v1/responses');
-  assert.equal(calls[0].headers.Authorization, 'Bearer nr-key');
-  assert.equal(calls[0].body.model, 'cx/gpt-6-astra');
-  assert.equal(calls[0].body.stream, false);
-  assert.deepEqual(calls[0].body.tools, [{ type: 'image_generation' }]);
-  const content = calls[0].body.input[0].content;
-  assert.match(content[0].text, /EDIT REQUEST: make the sky blue/);
-  assert.equal(content[1].type, 'input_image');
-  assert.match(content[1].image_url, /^data:image\/png;base64,/);
-  const meta = await sharp(Buffer.from(result.base64Result, 'base64')).metadata();
-  assert.equal(meta.width, 400);
-  assert.equal(meta.height, 400);
-  assert.equal(result.model, 'cx/gpt-6-astra');
-});
-
-test('ninerouter provider rejects results whose aspect ratio drifted instead of stretching them', async (t) => {
-  const old = config.ninerouterKey;
-  config.ninerouterKey = 'nr-key';
-  t.after(() => { config.ninerouterKey = old; });
-  const source = await solidPng(400, 400);
-  const generated = await solidPng(600, 400);
-  t.mock.method(globalThis, 'fetch', async () => Response.json({ output: [
-    { type: 'image_generation_call', result: generated.toString('base64') },
-  ] }));
-  const provider = getProviderFor('ninerouter', 'cx/gpt-6-astra');
-  await assert.rejects(provider.edit(source.toString('base64'), '', 'edit'), /tỉ lệ/);
-});
-
-test('ninerouter provider surfaces the assistant text when no image is returned', async (t) => {
-  const old = config.ninerouterKey;
-  config.ninerouterKey = 'nr-key';
-  t.after(() => { config.ninerouterKey = old; });
-  const source = await solidPng(400, 400);
-  t.mock.method(globalThis, 'fetch', async () => Response.json({ output: [
-    { type: 'message', content: [{ type: 'output_text', text: 'no image-editing tool is available' }] },
-  ] }));
-  const provider = getProviderFor('ninerouter', 'cx/gpt-6-luna');
-  await assert.rejects(provider.edit(source.toString('base64'), '', 'edit'), /no image-editing tool is available/);
-});
-
 test('ninerouter provider requires an API key and reports gateway errors', async (t) => {
   const old = config.ninerouterKey;
   const source = await solidPng(64, 64);
@@ -305,7 +246,7 @@ test('gpt-image size follows the crop aspect ratio', () => {
   assert.deepEqual(pickGptImageSize(3000, 1000), { width: 1536, height: 1024 });
 });
 
-test('ninerouter gpt-image model edits through /images/generations at a standard size', async (t) => {
+test('ninerouter Astra edits through /images/generations at a standard size, never /responses', async (t) => {
   const old = { key: config.ninerouterKey, url: config.ninerouterBaseUrl };
   config.ninerouterKey = 'nr-key';
   config.ninerouterBaseUrl = 'http://gateway.invalid/v1/';
@@ -317,13 +258,14 @@ test('ninerouter gpt-image model edits through /images/generations at a standard
     calls.push({ url: String(url), headers: options?.headers as Record<string, string>, body: JSON.parse(options?.body as string) });
     return Response.json({ data: [{ b64_json: generated.toString('base64') }] });
   });
-  const provider = getProviderFor('ninerouter', 'cx/gpt-image-2.5-flare', undefined, undefined, { quality: 'high' });
+  const provider = getProviderFor('ninerouter', 'cx/gpt-6-astra', undefined, undefined, { quality: 'high' });
+  assert.equal(provider.name, 'ninerouter');
   const result = await provider.edit(source.toString('base64'), '', 'add a car');
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, 'http://gateway.invalid/v1/images/generations');
   assert.equal(calls[0].headers.Authorization, 'Bearer nr-key');
   const { body } = calls[0];
-  assert.equal(body.model, 'cx/gpt-image-2.5-flare');
+  assert.equal(body.model, 'cx/gpt-6-astra');
   assert.equal(body.quality, 'high');
   assert.equal(body.size, '1536x1024');
   assert.equal(body.output_format, 'png');
@@ -336,10 +278,10 @@ test('ninerouter gpt-image model edits through /images/generations at a standard
   const meta = await sharp(Buffer.from(result.base64Result, 'base64')).metadata();
   assert.equal(meta.width, 1200);
   assert.equal(meta.height, 800);
-  assert.equal(result.model, 'cx/gpt-image-2.5-flare');
+  assert.equal(result.model, 'cx/gpt-6-astra');
 });
 
-test('ninerouter gpt-image model defaults to high quality without extraParams', async (t) => {
+test('ninerouter defaults to high quality without extraParams', async (t) => {
   const old = config.ninerouterKey;
   config.ninerouterKey = 'nr-key';
   t.after(() => { config.ninerouterKey = old; });
@@ -350,11 +292,11 @@ test('ninerouter gpt-image model defaults to high quality without extraParams', 
     quality = JSON.parse(options?.body as string).quality;
     return Response.json({ data: [{ b64_json: generated.toString('base64') }] });
   });
-  await getProviderFor('ninerouter', 'cx/gpt-image-2.5-flare').edit(source.toString('base64'), '', 'edit');
+  await getProviderFor('ninerouter', 'cx/gpt-6-astra').edit(source.toString('base64'), '', 'edit');
   assert.equal(quality, 'high');
 });
 
-test('ninerouter gpt-image model accepts its own resolution when the aspect ratio matches', async (t) => {
+test('ninerouter accepts its own resolution when the aspect ratio matches', async (t) => {
   const old = config.ninerouterKey;
   config.ninerouterKey = 'nr-key';
   t.after(() => { config.ninerouterKey = old; });
@@ -362,17 +304,17 @@ test('ninerouter gpt-image model accepts its own resolution when the aspect rati
   // Asked for 1024x1024, the gateway answers with its own square size.
   const generated = await solidPng(1254, 1254);
   t.mock.method(globalThis, 'fetch', async () => Response.json({ data: [{ b64_json: generated.toString('base64') }] }));
-  const result = await getProviderFor('ninerouter', 'cx/gpt-image-2.5-flare').edit(source.toString('base64'), '', 'edit');
+  const result = await getProviderFor('ninerouter', 'cx/gpt-6-astra').edit(source.toString('base64'), '', 'edit');
   const meta = await sharp(Buffer.from(result.base64Result, 'base64')).metadata();
   assert.deepEqual([meta.width, meta.height], [876, 876]);
 });
 
-test('ninerouter gpt-image model fails when no image or a wrong aspect ratio comes back', async (t) => {
+test('ninerouter fails when no image or a wrong aspect ratio comes back', async (t) => {
   const old = config.ninerouterKey;
   config.ninerouterKey = 'nr-key';
   t.after(() => { config.ninerouterKey = old; });
   const source = await solidPng(1200, 800);
-  const provider = getProviderFor('ninerouter', 'cx/gpt-image-2.5-flare');
+  const provider = getProviderFor('ninerouter', 'cx/gpt-6-astra');
   t.mock.method(globalThis, 'fetch', async () => Response.json({ data: [{}] }));
   await assert.rejects(provider.edit(source.toString('base64'), '', 'edit'), /9router không trả ảnh/);
   const wrong = await solidPng(1024, 1024);
