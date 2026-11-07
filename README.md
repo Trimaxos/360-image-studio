@@ -5,13 +5,13 @@ Trình chỉnh sửa ảnh panorama 360° và ảnh phẳng trên trình duyệt
 - Xem panorama equirectangular, điều chỉnh góc nhìn và đường chân trời.
 - Chỉnh ảnh theo vùng, quản lý layer và so sánh các biến thể kết quả.
 - Lưu/mở dự án `.360project` và xuất ảnh.
-- Model AI qua fal.ai hoặc 9router (GPT Image bằng tài khoản ChatGPT); URL và API key nhập ngay trong ứng dụng (⚙ Settings).
+- Model AI: GPT Image bằng tài khoản ChatGPT (đăng nhập qua Codex CLI) hoặc fal.ai (API key nhập ngay trong ứng dụng, ⚙ Settings).
 
 **Công nghệ:** React, TypeScript, Photo Sphere Viewer, Fabric.js, Express và Sharp/libvips.
 
 ## Chạy từ mã nguồn
 
-Cài Node.js 22.12+ và npm. Sao chép `.env.example` thành `.env`; API key có thể để trống ở đó và nhập trong ứng dụng (⚙ Settings). Dịch vụ AI có điều khoản và chi phí riêng.
+Cài Node.js 22.12+ và npm. Sao chép `.env.example` thành `.env`; API key có thể để trống ở đó và nhập trong ứng dụng (⚙ Settings). Model ChatGPT dùng đăng nhập của Codex CLI (`npm install -g @openai/codex`, rồi `codex login`). Dịch vụ AI có điều khoản và chi phí riêng.
 
 ```sh
 npm ci

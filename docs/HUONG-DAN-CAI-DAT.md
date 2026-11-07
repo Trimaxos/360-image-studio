@@ -57,6 +57,8 @@ Copy-Item .env.example .env
 
 Không cần điền gì vào file này: API key được nhập ngay trong ứng dụng (mục 6).
 
+Model AI mặc định (**GPT Image — ChatGPT trực tiếp**) dùng phiên đăng nhập ChatGPT của Codex CLI trên máy này. Trước khi chạy, cài Codex CLI và chạy `codex login` theo mục 5 trong [hướng dẫn bộ cài](../release/HUONG-DAN-CAI-DAT.md). `compose.yaml` đã gắn sẵn thư mục `%USERPROFILE%\.codex` vào ứng dụng.
+
 ## 6. Build và chạy lần đầu
 
 Đảm bảo Docker Desktop đang chạy, sau đó thực hiện:
@@ -86,11 +88,10 @@ Hoặc nhập vào trình duyệt:
 http://localhost:3001
 ```
 
-Nhập API key: bấm nút **⚙ Settings** trên thanh trên cùng, điền rồi bấm **Lưu**.
+Model mặc định không cần key. Chỉ cần ⚙ Settings khi dùng model fal.ai: bấm nút **⚙ Settings** trên thanh trên cùng, điền rồi bấm **Lưu**.
 
-- `URL 9router`: giữ nguyên giá trị có sẵn khi 9router chạy trên chính máy này.
-- `API key 9router`: lấy trên trang quản lý 9router. Cách cài 9router xem mục 5 trong [hướng dẫn bộ cài](../release/HUONG-DAN-CAI-DAT.md).
 - `Key fal.ai`: dùng cho các model fal.ai. Để trống thì không dùng được các model này.
+- `URL 9router`, `API key 9router`: để nguyên hoặc để trống, các model 9router đang tạm ẩn.
 
 Chỉ cần nhập một lần: key được lưu trong Docker volume, build lại hay cập nhật source mới đều không phải nhập lại.
 
