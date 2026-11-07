@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyFalModel, getModelCatalog, ninerouterOptions } from './model-catalog';
+import { chatgptOptions, classifyFalModel, getModelCatalog, ninerouterOptions } from './model-catalog';
 import { config } from './config';
 
 test('fal image edit and inpainting models remain in catalog', () => {
@@ -115,7 +115,18 @@ test('9router models are offered even without a key (Generate asks for it), Flar
   }
 });
 
-test('catalog lists 9router before fal and fal only offers Flare Medium', async (t) => {
+test('ChatGPT offers one image model, which needs no key (the Codex CLI login is checked on Generate)', () => {
+  const models = chatgptOptions();
+  assert.deepEqual(models.map((m) => m.id), ['gpt-image-2']);
+  const [model] = models;
+  assert.equal(model.provider, 'chatgpt');
+  assert.equal(model.enabled, true);
+  assert.equal(model.hasMask, false);
+  assert.equal(model.supportsReferenceImages, false);
+  assert.ok(model.capabilities.includes('image-edit'));
+});
+
+test('catalog lists ChatGPT first, hides 9router (it returns no images) and fal only offers Flare Medium', async (t) => {
   const old = config.ninerouterKey;
   t.after(() => { config.ninerouterKey = old; });
   config.ninerouterKey = 'nr-key';
@@ -125,7 +136,8 @@ test('catalog lists 9router before fal and fal only offers Flare Medium', async 
     ...editSchemaWithImageSize({ type: 'string', enum: ['auto'] }),
   }] }));
   const { groups } = await getModelCatalog();
-  assert.equal(groups[0].provider, 'ninerouter');
+  assert.deepEqual(groups.map((group) => group.provider), ['chatgpt', 'fal']);
+  assert.deepEqual(groups[0].models.map((m) => m.id), ['gpt-image-2']);
   const fal = groups.find((group) => group.provider === 'fal');
   assert.deepEqual(fal?.models.map((m) => m.id), ['openai/gpt-image-2.5/flare/edit::medium']);
   assert.equal(fal?.models[0].endpointId, 'openai/gpt-image-2.5/flare/edit');

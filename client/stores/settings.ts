@@ -3,12 +3,13 @@ import { create } from 'zustand';
 import type { AiProviderName, SettingsStatus } from '../../shared/types';
 import { api } from '../lib/api';
 
-export const PROVIDER_LABEL: Record<AiProviderName, string> = { ninerouter: '9router', fal: 'fal.ai' };
-const KEY_FIELD: Record<AiProviderName, 'ninerouterKey' | 'falAiKey'> = { ninerouter: 'ninerouterKey', fal: 'falAiKey' };
+export const PROVIDER_LABEL: Record<AiProviderName, string> = { ninerouter: '9router', fal: 'fal.ai', chatgpt: 'ChatGPT' };
+const KEY_FIELD: Record<Exclude<AiProviderName, 'chatgpt'>, 'ninerouterKey' | 'falAiKey'> = { ninerouter: 'ninerouterKey', fal: 'falAiKey' };
 
-/** False only when the settings are known and say this service has no key; unknown counts as yes (the server still checks). */
+/** False only when the settings are known and say this service has no key; unknown counts as yes (the server still checks).
+ *  ChatGPT has no key: it signs in with the Codex CLI login, which the server checks. */
 export function hasKeyFor(status: SettingsStatus | null, provider: AiProviderName): boolean {
-  return !status || !!status[KEY_FIELD[provider]];
+  return provider === 'chatgpt' || !status || !!status[KEY_FIELD[provider]];
 }
 
 interface SettingsState {

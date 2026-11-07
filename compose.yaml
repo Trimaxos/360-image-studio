@@ -15,10 +15,13 @@ services:
       CACHE_DIR: /data/cache
       # 9router runs on the Windows host, not inside the container
       NINEROUTER_BASE_URL: http://host.docker.internal:20128/v1
+      # The ChatGPT model signs in with this computer's Codex CLI login (codex login)
+      CODEX_AUTH_FILE: /codex/auth.json
     ports:
       - "127.0.0.1:3001:3001"
     volumes:
       - image-studio-data:/data
+      - ${USERPROFILE}/.codex:/codex
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 30s

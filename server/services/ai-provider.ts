@@ -2,6 +2,7 @@ import { config } from '../config';
 import sharp from 'sharp';
 import { exactModelSize, isValidModelSize } from '../../shared/model-crop';
 import type { AiProviderName } from '../../shared/types';
+import { chatgptCredentials, type ChatGptCredentials } from './chatgpt-auth';
 
 const PRESERVATION_RULES = [
   'Make one minimal, localized edit to the provided image.',
@@ -342,6 +343,17 @@ export function pickGptImageSize(width: number, height: number): { width: number
   return { width: 1024, height: 1024 };
 }
 
+// The endpoint picks its own resolution (asked 1024×1024, got 1254×1254), so only the shape is checked:
+// the result is stretched back to the crop, which is exact as long as the aspect ratio held.
+async function fitStandardSizeResult(sourceImage: Buffer, size: { width: number; height: number }, resultBuffer: Buffer) {
+  const actual = await sharp(resultBuffer).metadata();
+  const drift = Math.abs((actual.width! / actual.height!) / (size.width / size.height) - 1);
+  if (drift > NINEROUTER_ASPECT_TOLERANCE) {
+    throw new Error(`Model trả ảnh sai tỉ lệ: ${actual.width}×${actual.height}; yêu cầu ${size.width}×${size.height}. Hãy thử lại.`);
+  }
+  return normalizeResultToSourceDimensions(sourceImage, resultBuffer);
+}
+
 class NineRouterProvider implements AiProvider {
   name = 'ninerouter' as const;
   constructor(
@@ -372,15 +384,7 @@ class NineRouterProvider implements AiProvider {
     const data = await response.json() as any;
     const b64 = data.data?.[0]?.b64_json;
     if (!b64) throw new Error('9router không trả ảnh');
-    const resultBuffer = Buffer.from(b64, 'base64');
-    // The gateway picks its own resolution (asked 1024×1024, got 1254×1254), so only the shape is checked:
-    // the result is stretched back to the crop, which is exact as long as the aspect ratio held.
-    const actual = await sharp(resultBuffer).metadata();
-    const drift = Math.abs((actual.width! / actual.height!) / (size.width / size.height) - 1);
-    if (drift > NINEROUTER_ASPECT_TOLERANCE) {
-      throw new Error(`Model trả ảnh sai tỉ lệ: ${actual.width}×${actual.height}; yêu cầu ${size.width}×${size.height}. Hãy thử lại.`);
-    }
-    const normalized = await normalizeResultToSourceDimensions(sourceImage, resultBuffer);
+    const normalized = await fitStandardSizeResult(sourceImage, size, Buffer.from(b64, 'base64'));
     return { base64Result: normalized.toString('base64'), model: this.modelId };
   }
   async edit(base64Image: string, _base64Mask: string, prompt: string) {
@@ -422,6 +426,47 @@ class NineRouterProvider implements AiProvider {
   }
 }
 
+// ChatGPT's own image endpoint, the one Codex CLI uses, signed in with the Codex CLI login. It ignores model, quality
+// and size: ChatGPT picks the image model and quality, and answers at the standard size matching the input's shape,
+// so the crop goes out at that size (same as the Images API above) and is stretched back afterwards.
+const CHATGPT_IMAGES_URL = 'https://chatgpt.com/backend-api/codex/images/edits';
+
+class ChatGptProvider implements AiProvider {
+  name = 'chatgpt' as const;
+  constructor(public modelId: string, private isRegionEdit?: boolean) {}
+  async edit(base64Image: string, _base64Mask: string, prompt: string) {
+    const sourceImage = Buffer.from(base64Image, 'base64');
+    const sourceMetadata = await sharp(sourceImage).metadata();
+    const size = pickGptImageSize(sourceMetadata.width!, sourceMetadata.height!);
+    const prepared = await resizeRequestInputs(base64Image, '', size.width, size.height);
+    const body = JSON.stringify({
+      images: [{ image_url: await toRequestDataUri(prepared.base64Image) }],
+      prompt: this.isRegionEdit ? buildRegionEditPrompt(prompt) : buildPreservationPrompt(prompt),
+      background: 'auto',
+      model: this.modelId,
+      quality: 'auto',
+      size: 'auto',
+    });
+    const send = ({ accessToken, accountId }: ChatGptCredentials) => fetch(CHATGPT_IMAGES_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`, 'ChatGPT-Account-Id': accountId,
+        originator: 'codex_exec', 'Content-Type': 'application/json',
+      },
+      body,
+      signal: AbortSignal.timeout(280_000),
+    });
+    let response = await send(await chatgptCredentials());
+    if (response.status === 401) response = await send(await chatgptCredentials(true));
+    if (!response.ok) throw new Error(`ChatGPT error: ${response.status} ${(await response.text()).slice(0, 400)}`);
+    const data = await response.json() as any;
+    const b64 = data.data?.[0]?.b64_json;
+    if (!b64) throw new Error('ChatGPT không trả ảnh');
+    const normalized = await fitStandardSizeResult(sourceImage, size, Buffer.from(b64, 'base64'));
+    return { base64Result: normalized.toString('base64'), model: this.modelId };
+  }
+}
+
 export function getProviderFor(
   provider: string,
   modelId: string,
@@ -432,6 +477,7 @@ export function getProviderFor(
   isRegionEdit?: boolean,
   supportsCustomImageSize?: boolean,
 ): AiProvider {
+  if (provider === 'chatgpt') return new ChatGptProvider(modelId, isRegionEdit);
   if (provider === 'ninerouter') return new NineRouterProvider(modelId, isRegionEdit, extraParams);
   if (provider !== 'fal') throw new Error(`Unsupported AI provider: ${provider}`);
   return new FalProvider(

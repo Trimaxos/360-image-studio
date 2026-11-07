@@ -15,4 +15,6 @@ export const config = {
   // 9router (local OpenAI-compatible gateway) — Codex image edit via ChatGPT account
   ninerouterBaseUrl: process.env.NINEROUTER_BASE_URL || 'http://localhost:20128/v1',
   ninerouterKey: process.env.NINEROUTER_API_KEY || '',
+  // ChatGPT image edits sign in with the Codex CLI login (`codex login`); Docker mounts the host's ~/.codex here
+  codexAuthFile: path.resolve(process.env.CODEX_AUTH_FILE || path.join(os.homedir(), '.codex', 'auth.json')),
 };

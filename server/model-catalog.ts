@@ -234,6 +234,27 @@ export function ninerouterOptions(): AiModelOption[] {
   }];
 }
 
+// ===== ChatGPT (Codex CLI login) =====
+
+// One model: ChatGPT's image endpoint ignores the model name (Flare, Sunburst or a made-up one answer the same) and
+// picks the image model and quality itself. No key: Generate reports a missing Codex CLI login.
+export function chatgptOptions(): AiModelOption[] {
+  return [{
+    id: 'gpt-image-2',
+    displayName: 'GPT Image — ChatGPT trực tiếp',
+    provider: 'chatgpt',
+    capabilities: ['image-edit'],
+    enabled: true,
+    hasMask: false,
+    maskRequired: false,
+    supportsReferenceImages: false,
+  }];
+}
+
+// Since November 2026 OpenAI turned down every image 9router asks Codex for ("Complexity 'low' is not supported for
+// this image model"), so its models are hidden, not removed: set this back to true once a 9router update fixes it.
+const SHOW_NINEROUTER_MODELS = false;
+
 // ===== Public API =====
 
 export async function getModelInfo(modelId: string): Promise<AiModelOption | undefined> {
@@ -253,9 +274,10 @@ export async function getModelCatalog(): Promise<ModelCatalogResponse> {
   } catch (error) {
     errors.fal = error instanceof Error ? error.message : 'Không tải được fal.ai catalog';
   }
-  const ninerouter = ninerouterOptions();
-  // 9router first: the model selector defaults to the first enabled model.
+  const ninerouter = SHOW_NINEROUTER_MODELS ? ninerouterOptions() : [];
+  // ChatGPT first: the model selector defaults to the first enabled model.
   const groups: ModelCatalogResponse['groups'] = [
+    { provider: 'chatgpt', label: 'ChatGPT', models: chatgptOptions() },
     ...(ninerouter.length ? [{ provider: 'ninerouter' as const, label: '9router', models: ninerouter }] : []),
     { provider: 'fal', label: 'fal.ai', models: fal },
   ];

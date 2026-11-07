@@ -197,7 +197,7 @@ export interface GeneratedVariant {
   modelId: string;
 }
 
-export type AiProviderName = 'fal' | 'ninerouter';
+export type AiProviderName = 'fal' | 'ninerouter' | 'chatgpt';
 
 export interface AiModelOption {
   id: string;

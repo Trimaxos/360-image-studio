@@ -5,6 +5,9 @@ import {
   normalizeResultToSourceDimensions, pickGptImageSize, resizeRequestInputs,
 } from './ai-provider';
 import sharp from 'sharp';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { config } from '../config';
 
 test('selected fal model is used verbatim', () => {
@@ -377,4 +380,79 @@ test('ninerouter gpt-image model fails when no image or a wrong aspect ratio com
   await assert.rejects(provider.edit(source.toString('base64'), '', 'edit'), /sai tỉ lệ.*1024×1024.*1536×1024/);
   t.mock.method(globalThis, 'fetch', async () => new Response('boom', { status: 500 }));
   await assert.rejects(provider.edit(source.toString('base64'), '', 'edit'), /9router error: 500 boom/);
+});
+
+/** A Codex CLI login whose access token is still valid for an hour. */
+function useCodexLogin(t: test.TestContext) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-'));
+  const old = config.codexAuthFile;
+  config.codexAuthFile = path.join(dir, 'auth.json');
+  t.after(() => { config.codexAuthFile = old; fs.rmSync(dir, { recursive: true, force: true }); });
+  const payload = Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url');
+  const accessToken = `header.${payload}.signature`;
+  fs.writeFileSync(config.codexAuthFile, JSON.stringify({
+    auth_mode: 'chatgpt', tokens: { id_token: 'id', access_token: accessToken, refresh_token: 'rt', account_id: 'acct-1' },
+  }));
+  return accessToken;
+}
+
+test('chatgpt provider edits through ChatGPT\'s image endpoint with the Codex CLI login', async (t) => {
+  const accessToken = useCodexLogin(t);
+  const source = await solidPng(1200, 800);
+  const generated = await solidPng(1536, 1024);
+  const calls: Array<{ url: string; headers: Record<string, string>; body: any }> = [];
+  t.mock.method(globalThis, 'fetch', async (url: unknown, options?: RequestInit) => {
+    calls.push({ url: String(url), headers: options?.headers as Record<string, string>, body: JSON.parse(options?.body as string) });
+    return Response.json({ data: [{ b64_json: generated.toString('base64') }], quality: 'low', size: '1536x1024' });
+  });
+  const provider = getProviderFor('chatgpt', 'gpt-image-2');
+  assert.equal(provider.name, 'chatgpt');
+  const result = await provider.edit(source.toString('base64'), '', 'add a car');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://chatgpt.com/backend-api/codex/images/edits');
+  assert.equal(calls[0].headers.Authorization, `Bearer ${accessToken}`);
+  assert.equal(calls[0].headers['ChatGPT-Account-Id'], 'acct-1');
+  const { body } = calls[0];
+  assert.equal(body.model, 'gpt-image-2');
+  assert.match(body.prompt, /EDIT REQUEST: add a car/);
+  assert.equal(body.images.length, 1);
+  assert.match(body.images[0].image_url, /^data:image\/png;base64,/);
+  // The endpoint answers at the standard size matching the input's shape, so the crop is sent at that size.
+  const sent = await sharp(Buffer.from(body.images[0].image_url.split(',')[1], 'base64')).metadata();
+  assert.deepEqual([sent.width, sent.height], [1536, 1024]);
+  const meta = await sharp(Buffer.from(result.base64Result, 'base64')).metadata();
+  assert.deepEqual([meta.width, meta.height], [1200, 800]);
+  assert.equal(result.model, 'gpt-image-2');
+});
+
+test('chatgpt provider renews a turned-down login once and retries', async (t) => {
+  useCodexLogin(t);
+  const source = await solidPng(800, 800);
+  const generated = await solidPng(1024, 1024);
+  const payload = Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 86400 })).toString('base64url');
+  const renewed = `header.${payload}.renewed`;
+  const tokensUsed: string[] = [];
+  t.mock.method(globalThis, 'fetch', async (url: unknown, options?: RequestInit) => {
+    if (String(url).startsWith('https://auth.openai.com/')) return Response.json({ access_token: renewed, refresh_token: 'rt-2' });
+    const token = (options?.headers as Record<string, string>).Authorization;
+    tokensUsed.push(token);
+    if (token !== `Bearer ${renewed}`) return new Response('expired', { status: 401 });
+    return Response.json({ data: [{ b64_json: generated.toString('base64') }] });
+  });
+  await getProviderFor('chatgpt', 'gpt-image-2').edit(source.toString('base64'), '', 'edit');
+  assert.equal(tokensUsed.length, 2);
+  assert.equal(tokensUsed[1], `Bearer ${renewed}`);
+});
+
+test('chatgpt provider reports endpoint errors, missing images and a drifted aspect ratio', async (t) => {
+  useCodexLogin(t);
+  const source = await solidPng(1200, 800);
+  const provider = getProviderFor('chatgpt', 'gpt-image-2');
+  t.mock.method(globalThis, 'fetch', async () => new Response('slow down', { status: 429 }));
+  await assert.rejects(provider.edit(source.toString('base64'), '', 'edit'), /ChatGPT error: 429 slow down/);
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ data: [] }));
+  await assert.rejects(provider.edit(source.toString('base64'), '', 'edit'), /ChatGPT không trả ảnh/);
+  const wrong = await solidPng(1024, 1024);
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ data: [{ b64_json: wrong.toString('base64') }] }));
+  await assert.rejects(provider.edit(source.toString('base64'), '', 'edit'), /sai tỉ lệ.*1024×1024.*1536×1024/);
 });

@@ -102,6 +102,22 @@ test('Generate without a key for the model service asks to open Settings and sen
   }
 });
 
+test('the ChatGPT model needs no key: Generate goes straight to the AI', async (t) => {
+  const { store, generate, edits, settle, close } = await mountOpenLayer(t, 'hdr please',
+    { ninerouterBaseUrl: 'http://gateway/v1', ninerouterKey: null, falAiKey: null });
+  const { useConfirmStore } = await importUnsafe('../lib/confirm-dialog');
+  try {
+    await act(async () => store.getState().setSelectedModel(
+      { id: 'gpt-image-2', provider: 'chatgpt', displayName: 'GPT Image', enabled: true, capabilities: ['image-edit'] }));
+    await act(async () => generate().click());
+    await settle();
+    assert.equal(useConfirmStore.getState().request, null);
+    assert.equal(edits.length, 1);
+  } finally {
+    await close();
+  }
+});
+
 test('the model picked at first is one whose service already has a key', async (t) => {
   const { JSDOM } = await importUnsafe('jsdom');
   const dom = new JSDOM('<!doctype html><html><body></body></html>', { pretendToBeVisual: true });
